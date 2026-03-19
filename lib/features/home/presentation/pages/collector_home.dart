@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../providers/app_providers.dart';
 import '../../../../core/app_theme.dart';
@@ -35,6 +36,9 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   }
 
   void _showBinAlert(List bins) {
+    // Play alert sound 3 times for urgency
+    _playAlertSound();
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -105,6 +109,15 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
         ],
       ),
     );
+  }
+
+  void _playAlertSound() async {
+    // Play system alert sound 3 times with delay
+    for (int i = 0; i < 3; i++) {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.heavyImpact();
+      await Future.delayed(const Duration(milliseconds: 400));
+    }
   }
 
   @override
