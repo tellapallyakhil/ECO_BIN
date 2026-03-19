@@ -59,11 +59,65 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   }
 
   void _handleScannedCode(String code) {
-    // If the QR code is our bin ID (or a URL containing it)
-    // For now we accept any code that looks like a Bin ID
+    if (code.startsWith('ecobin://claim')) {
+      final uri = Uri.parse(code);
+      final binId = uri.queryParameters['binId'] ?? 'unknown';
+      final coins = int.tryParse(uri.queryParameters['coins'] ?? '0') ?? 0;
+      
+      _showClaimSuccess(binId, coins);
+      return;
+    }
+
+    // Default: If the QR code is our bin ID (or a URL containing it)
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => DepositScreen(binId: code)),
+    );
+  }
+
+  void _showClaimSuccess(String binId, int coins) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surfaceColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.accentColor.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.monetization_on, size: 48, color: AppTheme.accentColor),
+            ),
+            const SizedBox(height: 24),
+            const Text('Coins Claimed!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Text(
+              'You successfully claimed $coins EcoCoins for the collection at bin #$binId.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context); // Close dialog
+                  Navigator.pop(context); // Back to dashboard
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+                child: const Text('Great!'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

@@ -130,3 +130,38 @@ class CoinTransaction {
     );
   }
 }
+
+class CollectionRequest {
+  final String id;
+  final String userId;
+  final String binId;
+  final String? userName;
+  final String? binLocation;
+  final double weight;
+  final String status; // 'pending', 'approved', 'rejected'
+  final DateTime createdAt;
+
+  CollectionRequest({
+    required this.id,
+    required this.userId,
+    required this.binId,
+    this.userName,
+    this.binLocation,
+    required this.weight,
+    required this.status,
+    required this.createdAt,
+  });
+
+  factory CollectionRequest.fromMap(Map<String, dynamic> map) {
+    return CollectionRequest(
+      id: map['id'] ?? '',
+      userId: map['user_id'] ?? '',
+      binId: map['bin_id'] ?? '',
+      userName: map['user_name'],
+      binLocation: map['bin_location'],
+      weight: (map['weight'] as num?)?.toDouble() ?? 0.0,
+      status: map['status'] ?? 'pending',
+      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+    );
+  }
+}

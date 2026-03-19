@@ -8,6 +8,7 @@ import '../../../../models/models.dart';
 import '../../../map/presentation/pages/map_page.dart';
 import '../../../rewards/presentation/pages/rewards_page.dart';
 import '../../../insights/presentation/pages/insights_page.dart';
+import 'collection_completed_screen.dart';
 
 class CollectorHome extends ConsumerStatefulWidget {
   const CollectorHome({super.key});
@@ -161,6 +162,10 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
 
                   // Alert Banner
                   _buildAlertBanner(alertBinsAsync),
+
+                  // Pending Verifications (Manual Coin Assignment)
+                  _buildPendingVerifications(ref.watch(pendingCollectionsProvider)),
+                  const SizedBox(height: 24),
 
                   // Map preview
                   _buildMapPreview(context),
@@ -522,8 +527,15 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                   icon: const Icon(Icons.local_shipping, size: 18),
                   label: const Text('Mark as Collected'),
                   onPressed: () {
+                    final coins = (bin.currentWeight * 50).toInt();
+                    Navigator.push(
+                      context, 
+                      MaterialPageRoute(
+                        builder: (_) => CollectionCompletedScreen(bin: bin, coins: coins)
+                      )
+                    );
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('✅ Bin ${bin.locationName ?? bin.id} marked as collected! +${(bin.currentWeight * 50).toInt()} EcoCoins')),
+                      SnackBar(content: Text('✅ Bin ${bin.locationName ?? bin.id} marked as collected!')),
                     );
                   },
                   style: ElevatedButton.styleFrom(
@@ -535,6 +547,144 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildPendingVerifications(AsyncValue<List<CollectionRequest>> requestsAsync) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Pending Verifications', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text('Verify waste deposits & manually award coins', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4))),
+        const SizedBox(height: 16),
+        requestsAsync.when(
+          data: (requests) {
+            if (requests.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            return Column(
+              children: requests.map((req) => _buildRequestCard(req)).toList(),
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          error: (e, _) => const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRequestCard(CollectionRequest req) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GlassCard(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.history_edu, color: AppTheme.primaryColor),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(req.userName ?? 'Unknown User', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('${req.weight.toStringAsFixed(1)} kg dropped at ${req.binLocation}', 
+                    style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+                ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => _showCoinAssignmentDialog(req),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accentColor,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Award Coins', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCoinAssignmentDialog(CollectionRequest req) {
+    final controller = TextEditingController(text: '${(req.weight * 10).toInt()}');
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surfaceColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Assign EcoCoins'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('User: ${req.userName}', style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 8),
+            Text('Waste Weight: ${req.weight.toStringAsFixed(1)} kg', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(height: 20),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'EcoCoins to Award',
+                hintText: 'Enter amount',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final coins = int.tryParse(controller.text) ?? 0;
+              if (coins > 0) {
+                try {
+                  final supabase = ref.read(supabaseProvider);
+                  
+                  // 1. Update user coins
+                  final userProfile = await supabase.from('profiles').select('coins').eq('id', req.userId).maybeSingle();
+                  final currentCoins = (userProfile?['coins'] ?? 0) as int;
+
+                  await supabase.from('profiles').update({'coins': currentCoins + coins}).eq('id', req.userId);
+
+                  // 2. Log transaction
+                  await supabase.from('coin_transactions').insert({
+                    'user_id': req.userId,
+                    'amount': coins,
+                    'type': 'reward',
+                    'description': 'Awarded for ${req.weight.toStringAsFixed(1)} kg at ${req.binLocation}',
+                  });
+
+                  // 3. Mark request as approved
+                  await supabase.from('collection_requests').update({'status': 'approved'}).eq('id', req.id);
+
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ref.invalidate(pendingCollectionsProvider);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('✅ $coins Coins awarded to ${req.userName}!')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              }
+            },
+            child: const Text('Approve'),
+          ),
+        ],
       ),
     );
   }

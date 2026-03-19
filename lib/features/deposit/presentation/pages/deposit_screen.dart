@@ -72,11 +72,8 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
       ref.invalidate(allBinsProvider);
       final bins = await ref.read(allBinsProvider.future);
       final bin = bins.firstWhere((b) => b.id == widget.binId, orElse: () => bins.first);
-      final coins = await ref.read(depositProvider.notifier).finishDeposit(bin.currentWeight);
-      if (mounted) setState(() => _earnedCoins = coins);
-    } catch (_) {
-      if (mounted) setState(() => _earnedCoins = 0);
-    }
+      await ref.read(depositProvider.notifier).finishDeposit(bin.currentWeight);
+    } catch (_) {}
   }
 
   String get _timerText {
@@ -322,51 +319,50 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Success icon
+            // Pending Verification icon
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
                   colors: [
-                    AppTheme.primaryColor.withValues(alpha: 0.2),
+                    Colors.orange.withValues(alpha: 0.2),
                     AppTheme.accentColor.withValues(alpha: 0.1),
                   ],
                 ),
               ),
-              child: const Icon(Icons.celebration, size: 56, color: AppTheme.accentColor),
+              child: const Icon(Icons.hourglass_top, size: 56, color: Colors.orange),
             ),
             const SizedBox(height: 24),
-            const Text('Thank You! 🎉', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+            const Text('Deposit Recorded! 📝', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Text(
-              'You deposited ${deposited.toStringAsFixed(1)} kg of plastic!',
+              'You dropped ${deposited.toStringAsFixed(1)} kg of waste.',
               style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.6)),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
 
-            // Coins earned card
+            // Pending message card
             GlassCard(
               padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 32),
               child: Column(
                 children: [
-                  const Icon(Icons.monetization_on, color: AppTheme.accentColor, size: 40),
+                  const Icon(Icons.verified_user_outlined, color: AppTheme.primaryColor, size: 32),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Manual Verification',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                  ),
                   const SizedBox(height: 12),
                   Text(
-                    '+$_earnedCoins',
-                    style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppTheme.accentColor),
+                    'A worker will verify your deposit at this bin soon. Coins will be manually assigned once verified.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13, height: 1.4),
                   ),
-                  const SizedBox(height: 4),
-                  const Text('EcoCoins Earned', style: TextStyle(color: Colors.grey, fontSize: 13)),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              '10 coins per kg of plastic deposited',
-              style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.3)),
-            ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 48),
 
             SizedBox(
               width: 200, height: 48,
@@ -380,7 +376,7 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
-                child: const Text('Back to Home'),
+                child: const Text('Return to Home'),
               ),
             ),
           ],

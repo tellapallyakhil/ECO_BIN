@@ -32,9 +32,9 @@ class DepositNotifier extends Notifier<DepositSession?> {
     );
   }
 
-  /// Finish the deposit: record the new weight after plastic is dropped
-  Future<int> finishDeposit(double newWeight) async {
-    if (state == null) return 0;
+  /// Finish the deposit: create a request for worker to verify
+  Future<void> finishDeposit(double newWeight) async {
+    if (state == null) return;
 
     final session = DepositSession(
       binId: state!.binId,
@@ -43,30 +43,31 @@ class DepositNotifier extends Notifier<DepositSession?> {
       isActive: false,
     );
 
-    final coins = session.earnedCoins;
+    final deposited = session.depositedWeight;
 
-    // Award coins to the current user in Supabase
+    // Create a collection request for the worker to verify
     final user = Supabase.instance.client.auth.currentUser;
-    if (user != null && coins > 0) {
+    if (user != null && deposited > 0.1) { // Only if some plastic was added
       try {
-        // Update user coins
-        await Supabase.instance.client
-            .from('profiles')
-            .update({'coins': coins})
-            .eq('id', user.id);
+        // Fetch bin location for context
+        final binResponse = await Supabase.instance.client
+            .from('smart_bins')
+            .select('location_name')
+            .eq('id', session.binId)
+            .maybeSingle();
 
-        // Log the transaction
-        await Supabase.instance.client.from('coin_transactions').insert({
+        await Supabase.instance.client.from('collection_requests').insert({
           'user_id': user.id,
-          'amount': coins,
-          'type': 'reward',
-          'description': 'Deposited ${session.depositedWeight.toStringAsFixed(1)} kg of plastic',
+          'user_name': user.userMetadata?['full_name'] ?? 'Guest User',
+          'bin_id': session.binId,
+          'bin_location': binResponse?['location_name'] ?? 'Bin #${session.binId}',
+          'weight': deposited,
+          'status': 'pending',
         });
       } catch (_) {}
     }
 
     state = session;
-    return coins;
   }
 
   /// Reset the session

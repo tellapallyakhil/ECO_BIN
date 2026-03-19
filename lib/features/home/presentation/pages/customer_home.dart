@@ -8,6 +8,7 @@ import '../../../../models/models.dart';
 import '../../../insights/presentation/pages/insights_page.dart';
 import '../../../rewards/presentation/pages/rewards_page.dart';
 import '../../../map/presentation/pages/map_page.dart';
+import '../../../public/presentation/pages/qr_scanner_screen.dart';
 
 class CustomerHome extends ConsumerStatefulWidget {
   const CustomerHome({super.key});
@@ -103,20 +104,29 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
             ],
           ),
         ),
-        PopupMenuButton<String>(
-          icon: CircleAvatar(
-            backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.15),
-            child: const Icon(Icons.person, color: AppTheme.primaryColor),
-          ),
-          onSelected: (value) async {
-            if (value == 'logout') {
-              ref.invalidate(profileProvider);
-              ref.invalidate(userBinsProvider);
-              await signOut();
-            }
-          },
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: 'logout', child: Text('Sign Out')),
+        Row(
+          children: [
+            // Camera / QR Scanner for Bin Scanning
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner, color: AppTheme.primaryColor),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const QRScannerScreen())),
+            ),
+            PopupMenuButton<String>(
+              icon: CircleAvatar(
+                backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.15),
+                child: const Icon(Icons.person, color: AppTheme.primaryColor),
+              ),
+              onSelected: (value) async {
+                if (value == 'logout') {
+                  ref.invalidate(profileProvider);
+                  ref.invalidate(userBinsProvider);
+                  await signOut();
+                }
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'logout', child: Text('Sign Out')),
+              ],
+            ),
           ],
         ),
       ],

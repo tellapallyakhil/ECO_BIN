@@ -120,6 +120,18 @@ final rewardsProvider = FutureProvider<List<Reward>>((ref) async {
   return (response as List).map((e) => Reward.fromMap(e)).toList();
 });
 
+// Collection Requests (for manual verification)
+final pendingCollectionsProvider = FutureProvider<List<CollectionRequest>>((ref) async {
+  final response = await ref
+      .read(supabaseProvider)
+      .from('collection_requests')
+      .select()
+      .eq('status', 'pending')
+      .order('created_at', ascending: false);
+
+  return (response as List).map((e) => CollectionRequest.fromMap(e)).toList();
+});
+
 // Optimized Sign Out 
 Future<void> signOut() async {
   await Supabase.instance.client.auth.signOut();
