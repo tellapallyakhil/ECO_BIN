@@ -1,21 +1,24 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
+import '../services/thingspeak_service.dart';
 
 // Supabase client provider
 final supabaseProvider = Provider<SupabaseClient>((ref) {
   return Supabase.instance.client;
 });
 
-// Auth state stream
+// Auth state stream - watches for login/logout/session refresh
 final authStateProvider = StreamProvider<AuthState>((ref) {
-  return ref.watch(supabaseProvider).auth.onAuthStateChange;
+  final supabase = ref.watch(supabaseProvider);
+  return supabase.auth.onAuthStateChange;
 });
 
-// Current user session
+// Current user computed from session or direct check
 final currentUserProvider = Provider<User?>((ref) {
-  final authState = ref.watch(authStateProvider).value;
-  return authState?.session?.user ?? ref.watch(supabaseProvider).auth.currentUser;
+  final authAsync = ref.watch(authStateProvider);
+  return authAsync.value?.session?.user ?? Supabase.instance.client.auth.currentUser;
 });
 
 // Profile provider - Pure Supabase fetch
@@ -120,15 +123,34 @@ final rewardsProvider = FutureProvider<List<Reward>>((ref) async {
   return (response as List).map((e) => Reward.fromMap(e)).toList();
 });
 
+// Fetch all registered customers for workers to see
+final allUsersProvider = FutureProvider<List<AppUser>>((ref) async {
+  final supabase = ref.read(supabaseProvider);
+  print('DEBUG: Fetching all profiles from Supabase...');
+  
+  final response = await supabase
+      .from('profiles')
+      .select()
+      .order('full_name', ascending: true);
+  
+  final users = (response as List).map((e) => AppUser.fromMap(e)).toList();
+  final customers = users.where((u) => u.role != 'collector').toList();
+  
+  print('DEBUG: Found ${users.length} total profiles, ${customers.length} are customers.');
+  return customers;
+});
+
 // Collection Requests (for manual verification)
 final pendingCollectionsProvider = FutureProvider<List<CollectionRequest>>((ref) async {
+  print('DEBUG: Fetching pending collection requests...');
   final response = await ref
       .read(supabaseProvider)
       .from('collection_requests')
       .select()
       .eq('status', 'pending')
       .order('created_at', ascending: false);
-
+  
+  print('DEBUG: Found ${(response as List).length} pending collection requests.');
   return (response as List).map((e) => CollectionRequest.fromMap(e)).toList();
 });
 
@@ -136,3 +158,58 @@ final pendingCollectionsProvider = FutureProvider<List<CollectionRequest>>((ref)
 Future<void> signOut() async {
   await Supabase.instance.client.auth.signOut();
 }
+
+// Coin Transaction Timeline for Customers
+final coinTransactionsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return [];
+  
+  final response = await ref
+      .read(supabaseProvider)
+      .from('coin_transactions')
+      .select()
+      .eq('user_id', user.id)
+      .order('created_at', ascending: false)
+      .limit(20);
+  
+  return List<Map<String, dynamic>>.from(response);
+});
+
+// Claims provider: Tracks which worker has claimed which bin for collection
+final claimedBinsProvider = NotifierProvider<ClaimedBinsNotifier, Map<String, String>>(() {
+  return ClaimedBinsNotifier();
+});
+
+class ClaimedBinsNotifier extends Notifier<Map<String, String>> {
+  @override
+  Map<String, String> build() => {};
+
+  void claimBin(String binId, String workerId) {
+    state = {...state, binId: workerId};
+  }
+
+  void unclaimBin(String binId) {
+    state = Map.from(state)..remove(binId);
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  ThingSpeak Live Hardware Data Providers
+// ════════════════════════════════════════════════════════
+
+/// Live hardware data from ThingSpeak (auto-refreshes every 16 seconds)
+final liveHardwareProvider = StreamProvider<ThingSpeakBinData?>((ref) {
+  return Stream.periodic(const Duration(seconds: 16), (tick) => tick)
+      .asyncMap((tick) => ThingSpeakService.fetchLatest())
+      .asBroadcastStream();
+});
+
+/// One-shot fetch of latest hardware data (for manual refresh)
+final latestHardwareProvider = FutureProvider<ThingSpeakBinData?>((ref) async {
+  return await ThingSpeakService.fetchLatest();
+});
+
+/// Historical data from ThingSpeak (last 50 entries for charts)
+final hardwareHistoryProvider = FutureProvider<List<ThingSpeakBinData>>((ref) async {
+  return await ThingSpeakService.fetchHistory(results: 50);
+});

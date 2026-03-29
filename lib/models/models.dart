@@ -108,6 +108,7 @@ class CoinTransaction {
   final int amount;
   final String type; // 'reward', 'redemption', 'purchase'
   final String description;
+  final double? weight;      // Opt: recorded weight for this transaction
   final DateTime createdAt;
 
   CoinTransaction({
@@ -116,6 +117,7 @@ class CoinTransaction {
     required this.amount,
     required this.type,
     required this.description,
+    this.weight,
     required this.createdAt,
   });
 
@@ -126,6 +128,7 @@ class CoinTransaction {
       amount: (map['amount'] ?? 0) is int ? map['amount'] ?? 0 : (map['amount'] as num).toInt(),
       type: map['type'] ?? '',
       description: map['description'] ?? '',
+      weight: (map['weight'] as num?)?.toDouble(),
       createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
     );
   }

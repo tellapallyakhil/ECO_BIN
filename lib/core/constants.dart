@@ -17,7 +17,7 @@ class AppConstants {
 
   // Supabase
   static const String supabaseUrl = 'https://gtotmudrbkdixyuclyxy.supabase.co';
-  static const String supabaseAnonKey = 'sb_publishable_QpYHLUB6pXNG-idT4SeoNA_Tya7foE4';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0b3RtdWRyYmtkaXh5dWNseXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMzI3MzQsImV4cCI6MjA4ODkwODczNH0.uTpFw07DRd7qjHUqZfm9yDqk58GhjWl2ZsfXeLk7gBw';
 
   // Reward coins per kg of plastic collected
   static const int coinsPerKg = 50;

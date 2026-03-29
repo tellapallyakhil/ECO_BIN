@@ -16,7 +16,6 @@ class DepositScreen extends ConsumerStatefulWidget {
 
 class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTickerProviderStateMixin {
   int _step = 0; // 0 = connecting, 1 = countdown, 2 = done
-  int _earnedCoins = 0;
   int _secondsLeft = 120; // 2 minutes
   Timer? _timer;
   late AnimationController _pulseController;
@@ -231,63 +230,90 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
                   ),
                   // Progress ring
                   SizedBox(
-                    width: 200, height: 200,
+                    width: 220, height: 220,
                     child: CircularProgressIndicator(
                       value: _progress,
-                      strokeWidth: 8,
+                      strokeWidth: 10,
                       color: timerColor,
                       strokeCap: StrokeCap.round,
                     ),
                   ),
-                  // Timer text
+                  // Timer text and central content
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         _timerText,
                         style: TextStyle(
-                          fontSize: 42,
+                          fontSize: 52,
                           fontWeight: FontWeight.bold,
                           color: timerColor,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text('remaining', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4))),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: timerColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          'WINDOW OPEN',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: timerColor),
+                        ),
+                      ),
                     ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 48),
+
+            // Live Action Guidance
+            Text('Ready, Set, Drop!',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white.withValues(alpha: 0.9))),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: AppTheme.accentColor, size: 20),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'The bin is currently tracking your deposit. Please drop all plastic items now.',
+                      style: TextStyle(fontSize: 12, color: Colors.white70, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 40),
 
             // Animated bin icon
             AnimatedBuilder(
               animation: _pulseController,
-              builder: (_, child) => Transform.scale(
-                scale: 1.0 + (_pulseController.value * 0.08),
+              builder: (_, child) => Transform.translate(
+                offset: Offset(0, -(_pulseController.value * 12)),
                 child: child,
               ),
               child: Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: AppTheme.primaryColor.withValues(alpha: 0.1),
                 ),
-                child: const Icon(Icons.delete_outline, size: 40, color: AppTheme.primaryColor),
+                child: const Icon(Icons.recycling, size: 48, color: AppTheme.primaryColor),
               ),
             ),
-            const SizedBox(height: 24),
-
-            const Text('Drop your plastic now!',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(
-              'Place your plastic waste inside the bin.\nCoins will be calculated when the timer ends.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4), height: 1.5),
-            ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 48),
 
             // Early finish button
             SizedBox(

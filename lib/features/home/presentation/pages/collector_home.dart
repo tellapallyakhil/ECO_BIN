@@ -9,6 +9,8 @@ import '../../../map/presentation/pages/map_page.dart';
 import '../../../rewards/presentation/pages/rewards_page.dart';
 import '../../../insights/presentation/pages/insights_page.dart';
 import 'collection_completed_screen.dart';
+import '../../../hardware/presentation/pages/live_hardware_page.dart';
+import '../../../../services/notification_service.dart';
 
 class CollectorHome extends ConsumerStatefulWidget {
   const CollectorHome({super.key});
@@ -21,6 +23,19 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   @override
   void initState() {
     super.initState();
+    // 🔔 Register a background listener for the Sensor Data
+    ref.listenManual(liveHardwareProvider, (previous, next) {
+      next.whenData((data) async {
+        if (data != null && data.weight >= 600) {
+          // Trigger 600g BUZZER Alert!
+          await NotificationService.showFullBinAlert(
+            binLocation: 'Eco Bin (Live Hardware)',
+            binId: 'Hardware_Bin_01',
+          );
+        }
+      });
+    });
+
     // Check for full bins after build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForFullBinAlerts();
@@ -123,12 +138,12 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
 
   @override
   Widget build(BuildContext context) {
+    final filteredBinsAsync = ref.watch(filteredBinsProvider);
     final profileAsync = ref.watch(profileProvider);
-    final allBinsAsync = ref.watch(allBinsProvider);
-    final alertBinsAsync = ref.watch(alertBinsProvider);
+    final claimedBins = ref.watch(claimedBinsProvider);
+    final userId = ref.watch(currentUserProvider)?.id ?? '';
 
     final name = profileAsync.whenOrNull<String>(data: (p) => p.fullName) ?? 'Collector';
-    final coins = profileAsync.whenOrNull<int>(data: (p) => p.coins) ?? 0;
 
     return Scaffold(
       body: Container(
@@ -136,34 +151,27 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF0F172A), Color(0xFF1A2744), Color(0xFF0F172A)],
+            colors: [Color(0xFF0F172A), Color(0xFF1B2A4A), Color(0xFF0F172A)],
           ),
         ),
         child: SafeArea(
           child: RefreshIndicator(
             onRefresh: () async {
-              ref.invalidate(profileProvider);
               ref.invalidate(allBinsProvider);
-              ref.invalidate(alertBinsProvider);
+              ref.invalidate(pendingCollectionsProvider);
+              ref.invalidate(allUsersProvider);
             },
             child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
                   _buildHeader(name),
                   const SizedBox(height: 24),
 
-                  // Stats Row
-                  _buildStatsRow(coins, allBinsAsync, alertBinsAsync),
+                  _buildUserList(ref.watch(allUsersProvider)),
                   const SizedBox(height: 24),
 
-                  // Alert Banner
-                  _buildAlertBanner(alertBinsAsync),
-
-                  // Pending Verifications (Manual Coin Assignment)
                   _buildPendingVerifications(ref.watch(pendingCollectionsProvider)),
                   const SizedBox(height: 24),
 
@@ -176,7 +184,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                   const SizedBox(height: 24),
 
                   // Bin List
-                  _buildBinList(ref.watch(filteredBinsProvider)),
+                  _buildBinList(ref.watch(filteredBinsProvider), claimedBins, userId),
                   const SizedBox(height: 24),
 
                   // Quick Actions
@@ -264,56 +272,6 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
     );
   }
 
-  Widget _buildStatsRow(int coins, AsyncValue<List> allBinsAsync, AsyncValue<List> alertBinsAsync) {
-    final totalBins = allBinsAsync.whenOrNull<int>(data: (b) => b.length) ?? 0;
-    final fullBins = alertBinsAsync.whenOrNull<int>(data: (b) => b.length) ?? 0;
-
-    return Row(
-      children: [
-        Expanded(child: _StatCard(label: 'Waste Managed', value: '0 kg', icon: Icons.scale_outlined, color: AppTheme.accentColor)),
-        const SizedBox(width: 10),
-        Expanded(child: _StatCard(label: 'Total Bins', value: '$totalBins', icon: Icons.delete_outline, color: AppTheme.secondaryColor)),
-        const SizedBox(width: 10),
-        Expanded(child: _StatCard(label: 'Alerts', value: '$fullBins', icon: Icons.warning_amber, color: fullBins > 0 ? AppTheme.errorColor : AppTheme.primaryColor)),
-      ],
-    );
-  }
-
-  Widget _buildAlertBanner(AsyncValue<List> alertBinsAsync) {
-    final alertCount = alertBinsAsync.whenOrNull<int>(data: (b) => b.length) ?? 0;
-    if (alertCount == 0) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [AppTheme.errorColor.withValues(alpha: 0.2), AppTheme.errorColor.withValues(alpha: 0.05)],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.errorColor.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.notification_important, color: AppTheme.errorColor),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('$alertCount bin(s) need collection!', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text('These bins have crossed 85% capacity.', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.6))),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildMapPreview(BuildContext context) {
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MapPage())),
@@ -384,13 +342,13 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
             ),
           ),
           loading: () => const LinearProgressIndicator(),
-          error: (_, __) => const SizedBox.shrink(),
+          error: (e, s) => const SizedBox.shrink(),
         ),
       ],
     );
   }
 
-  Widget _buildBinList(AsyncValue<List<SmartBin>> allBinsAsync) {
+  Widget _buildBinList(AsyncValue<List<SmartBin>> allBinsAsync, Map<String, String> claimedBins, String userId) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -400,7 +358,17 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
         const SizedBox(height: 16),
         allBinsAsync.when(
           data: (bins) {
-            if (bins.isEmpty) {
+            final visibleBins = bins.where((bin) {
+              final isFull = bin.fillPercentage >= 0.85;
+              final claimant = claimedBins[bin.id];
+
+              if (isFull) {
+                return claimant == userId;
+              }
+              return true;
+            }).toList();
+
+            if (visibleBins.isEmpty) {
               return GlassCard(
                 padding: const EdgeInsets.symmetric(vertical: 40),
                 child: Center(
@@ -408,15 +376,17 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                     children: [
                       Icon(Icons.hub_outlined, size: 48, color: Colors.white.withValues(alpha: 0.1)),
                       const SizedBox(height: 16),
-                      Text('No bins registered in this area', style: TextStyle(color: Colors.white.withValues(alpha: 0.5))),
+                      const Text('Rest & Relax', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text('No tasks assigned to you right now.', style: TextStyle(color: Colors.white.withValues(alpha: 0.4))),
                     ],
                   ),
                 ),
               );
             }
-            final sorted = List.from(bins)..sort((a, b) => b.fillPercentage.compareTo(a.fillPercentage));
+
+            final sorted = List.from(visibleBins)..sort((a, b) => b.fillPercentage.compareTo(a.fillPercentage));
             return Column(
-              children: sorted.map<Widget>((bin) => _buildBinDetailCard(bin)).toList(),
+              children: sorted.map<Widget>((bin) => _buildBinDetailCard(bin, userId)).toList(),
             );
           },
           loading: () => const Center(
@@ -425,12 +395,13 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
           ),
-          error: (e, _) => Center(child: Text('Technical error: $e', style: const TextStyle(fontSize: 12, color: Colors.grey))),
+          error: (e, s) => Center(child: Text('Technical error: $e', style: const TextStyle(fontSize: 12, color: Colors.grey))),
         ),
       ],
     );
   }
-  Widget _buildBinDetailCard(dynamic bin) {
+
+  Widget _buildBinDetailCard(dynamic bin, String userId) {
     final pct = bin.fillPercentage;
     final color = pct >= 0.85 ? AppTheme.errorColor : (pct >= 0.6 ? AppTheme.accentColor : AppTheme.primaryColor);
 
@@ -442,7 +413,6 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
           children: [
             Row(
               children: [
-                // Fill indicator
                 Stack(
                   alignment: Alignment.center,
                   children: [
@@ -460,7 +430,6 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                   ],
                 ),
                 const SizedBox(width: 16),
-                // Bin info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -486,7 +455,6 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                     ],
                   ),
                 ),
-                // Status badge
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
@@ -501,7 +469,6 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               ],
             ),
             const SizedBox(height: 16),
-            // Waste details row
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -526,17 +493,24 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.local_shipping, size: 18),
                   label: const Text('Mark as Collected'),
-                  onPressed: () {
+                  onPressed: () async {
                     final coins = (bin.currentWeight * 50).toInt();
-                    Navigator.push(
-                      context, 
-                      MaterialPageRoute(
-                        builder: (_) => CollectionCompletedScreen(bin: bin, coins: coins)
-                      )
-                    );
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('✅ Bin ${bin.locationName ?? bin.id} marked as collected!')),
-                    );
+                    ref.read(claimedBinsProvider.notifier).claimBin(bin.id, userId);
+                    
+                    // 🔇 STOP BUZZER once accepted
+                    await NotificationService.stopBuzzer();
+                    
+                    if (context.mounted) {
+                      Navigator.push(
+                        context, 
+                        MaterialPageRoute(
+                          builder: (_) => CollectionCompletedScreen(bin: bin, coins: coins)
+                        )
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('✅ Bin ${bin.locationName ?? bin.id} marked as collected!')),
+                      );
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryColor,
@@ -562,20 +536,55 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
         requestsAsync.when(
           data: (requests) {
             if (requests.isEmpty) {
-              return const SizedBox.shrink();
+              return GlassCard(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.checklist_rtl, size: 32, color: Colors.white.withValues(alpha: 0.1)),
+                      const SizedBox(height: 8),
+                      Text('No pending verifications', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13)),
+                    ],
+                  ),
+                ),
+              );
             }
             return Column(
               children: requests.map((req) => _buildRequestCard(req)).toList(),
             );
           },
-          loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          error: (e, _) => const SizedBox.shrink(),
+          loading: () => const Center(child: Padding(
+            padding: EdgeInsets.all(20),
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )),
+          error: (e, _) => GlassCard(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.error_outline, color: AppTheme.errorColor, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Error loading requests: ${e.toString()}',
+                    style: const TextStyle(fontSize: 11, color: AppTheme.errorColor),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  onPressed: () => ref.invalidate(pendingCollectionsProvider),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildRequestCard(CollectionRequest req) {
+    final timeStr = "${req.createdAt.hour}:${req.createdAt.minute.toString().padLeft(2, '0')}";
+    final dateStr = "${req.createdAt.day}/${req.createdAt.month}";
+    
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassCard(
@@ -583,33 +592,62 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppTheme.primaryColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.history_edu, color: AppTheme.primaryColor),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(timeStr, style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(dateStr, style: TextStyle(color: AppTheme.primaryColor.withValues(alpha: 0.5), fontSize: 9)),
+                ],
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(req.userName ?? 'Unknown User', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('${req.weight.toStringAsFixed(1)} kg dropped at ${req.binLocation}', 
-                    style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+                  Row(
+                    children: [
+                      Text(req.userName ?? 'Customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accentColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('2m Session', style: TextStyle(color: AppTheme.accentColor, fontSize: 8, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.scale, size: 12, color: Colors.white70),
+                      const SizedBox(width: 4),
+                      Text('${req.weight.toStringAsFixed(1)} kg', 
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(' • ${req.binLocation}', 
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+                    ],
+                  ),
                 ],
               ),
             ),
             ElevatedButton(
               onPressed: () => _showCoinAssignmentDialog(req),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentColor,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                backgroundColor: AppTheme.primaryColor,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              child: const Text('Award Coins', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              child: const Text('Review', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -618,71 +656,157 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   }
 
   void _showCoinAssignmentDialog(CollectionRequest req) {
-    final controller = TextEditingController(text: '${(req.weight * 10).toInt()}');
+    final coinsController = TextEditingController(text: '${(req.weight * 10).toInt()}');
+    final noteController = TextEditingController();
+    final liveData = ref.read(liveHardwareProvider).value;
+    final liveWeight = liveData?.weight ?? req.weight;
+    final timestamp = DateTime.now();
     
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: AppTheme.surfaceColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Assign EcoCoins'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            Text('User: ${req.userName}', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 8),
-            Text('Waste Weight: ${req.weight.toStringAsFixed(1)} kg', style: const TextStyle(fontSize: 13, color: Colors.grey)),
-            const SizedBox(height: 20),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'EcoCoins to Award',
-                hintText: 'Enter amount',
-              ),
-            ),
+            Icon(Icons.monetization_on, color: AppTheme.accentColor, size: 24),
+            const SizedBox(width: 8),
+            const Text('Award EcoCoins'),
           ],
         ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // User info
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.person, size: 18, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(req.userName ?? 'Unknown User', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    const Icon(Icons.timer, size: 14, color: AppTheme.accentColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      "${req.createdAt.hour}:${req.createdAt.minute.toString().padLeft(2, '0')}", 
+                      style: const TextStyle(fontSize: 12, color: AppTheme.accentColor, fontWeight: FontWeight.bold)
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Weight info
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.scale, size: 18, color: AppTheme.primaryColor),
+                    const SizedBox(width: 8),
+                    Text('Weight: ${liveWeight.toStringAsFixed(1)} g', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    Text('${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
+                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Coins field
+              TextField(
+                controller: coinsController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'EcoCoins to Award',
+                  hintText: 'Enter coin amount',
+                  prefixIcon: Icon(Icons.stars),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Note field (mandatory)
+              TextField(
+                controller: noteController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason / Note *',
+                  hintText: 'e.g. Deposited 450g of plastic bottles',
+                  prefixIcon: Icon(Icons.note_add),
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.check, size: 18),
+            label: const Text('Approve & Award'),
             onPressed: () async {
-              final coins = int.tryParse(controller.text) ?? 0;
-              if (coins > 0) {
-                try {
-                  final supabase = ref.read(supabaseProvider);
-                  
-                  // 1. Update user coins
-                  final userProfile = await supabase.from('profiles').select('coins').eq('id', req.userId).maybeSingle();
-                  final currentCoins = (userProfile?['coins'] ?? 0) as int;
+              final coins = int.tryParse(coinsController.text) ?? 0;
+              final note = noteController.text.trim();
+              
+              if (coins <= 0) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid coin amount')),
+                );
+                return;
+              }
+              if (note.isEmpty) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text('Please add a note explaining the reward')),
+                );
+                return;
+              }
 
-                  await supabase.from('profiles').update({'coins': currentCoins + coins}).eq('id', req.userId);
+              try {
+                final supabase = ref.read(supabaseProvider);
+                
+                // 1. Update user coins
+                final userProfile = await supabase.from('profiles').select('coins').eq('id', req.userId).maybeSingle();
+                final currentCoins = (userProfile?['coins'] ?? 0) as int;
+                await supabase.from('profiles').update({'coins': currentCoins + coins}).eq('id', req.userId);
 
-                  // 2. Log transaction
-                  await supabase.from('coin_transactions').insert({
-                    'user_id': req.userId,
-                    'amount': coins,
-                    'type': 'reward',
-                    'description': 'Awarded for ${req.weight.toStringAsFixed(1)} kg at ${req.binLocation}',
-                  });
+                // 2. Log transaction with note, weight, and timestamp
+                await supabase.from('coin_transactions').insert({
+                  'user_id': req.userId,
+                  'amount': coins,
+                  'type': 'reward',
+                  'description': note,
+                  'weight': liveWeight,
+                });
 
-                  // 3. Mark request as approved
-                  await supabase.from('collection_requests').update({'status': 'approved'}).eq('id', req.id);
+                // 3. Mark request as approved
+                await supabase.from('collection_requests').update({'status': 'approved'}).eq('id', req.id);
 
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ref.invalidate(pendingCollectionsProvider);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('✅ $coins Coins awarded to ${req.userName}!')),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (mounted) {
+                  ref.invalidate(pendingCollectionsProvider);
+                  ref.invalidate(profileProvider);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('✅ $coins Coins awarded to ${req.userName}! Note: $note')),
+                  );
+                }
+              } catch (e) {
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(content: Text('Error: $e')));
                 }
               }
             },
-            child: const Text('Approve'),
           ),
         ],
       ),
@@ -692,6 +816,22 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   Widget _buildQuickActions(BuildContext context) {
     return Row(
       children: [
+        Expanded(
+          child: GestureDetector(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LiveHardwarePage())),
+            child: GlassCard(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: const Column(
+                children: [
+                  Icon(Icons.sensors, color: AppTheme.primaryColor, size: 28),
+                  SizedBox(height: 8),
+                  Text('Live Sensor', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
         Expanded(
           child: GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RewardsPage())),
@@ -724,6 +864,191 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildUserList(AsyncValue<List<AppUser>> usersAsync) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.people_alt_outlined, color: AppTheme.primaryColor, size: 20),
+                SizedBox(width: 8),
+                Text('Registered Customers', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 18, color: Colors.grey),
+              onPressed: () => ref.invalidate(allUsersProvider),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        usersAsync.when(
+          data: (users) {
+            if (users.isEmpty) {
+              return GlassCard(
+                padding: const EdgeInsets.all(16),
+                child: Center(
+                  child: Text('No customers registered', style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 13)),
+                ),
+              );
+            }
+            return SizedBox(
+              height: 110,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: users.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final user = users[index];
+                  return GestureDetector(
+                    onTap: () => _showManualCoinAwardDialog(user),
+                    child: Column(
+                      children: [
+                        CircleAvatar(
+                          radius: 30,
+                          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
+                          child: Text(
+                            user.fullName.isNotEmpty ? user.fullName[0].toUpperCase() : '?',
+                            style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: 70,
+                          child: Text(
+                            user.fullName,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+          loading: () => const Center(child: LinearProgressIndicator(minHeight: 2)),
+          error: (e, _) => Text('Error loading users: $e', style: const TextStyle(color: AppTheme.errorColor, fontSize: 11)),
+        ),
+      ],
+    );
+  }
+
+  void _showManualCoinAwardDialog(AppUser user) {
+    final coinsController = TextEditingController();
+    final noteController = TextEditingController();
+    final liveData = ref.read(liveHardwareProvider).value;
+    final liveWeight = liveData?.weight ?? 0.0;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppTheme.surfaceColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.stars, color: AppTheme.accentColor, size: 24),
+            const SizedBox(width: 8),
+            const Text('Manual Reward'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Awarding: ${user.fullName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.scale, size: 18, color: AppTheme.primaryColor),
+                    const SizedBox(width: 8),
+                    Text('Live Hardware Weight: ${liveWeight.toStringAsFixed(1)}g'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: coinsController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'EcoCoins to Award',
+                  prefixIcon: Icon(Icons.stars),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Reason for Reward',
+                  hintText: 'e.g. Deposited 5 bottles',
+                  prefixIcon: Icon(Icons.note_add),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final coins = int.tryParse(coinsController.text) ?? 0;
+              final note = noteController.text.trim();
+              if (coins <= 0) return;
+              
+              try {
+                final supabase = ref.read(supabaseProvider);
+                
+                // 1. Get current coins 
+                final currentCoinsResponse = await supabase.from('profiles').select('coins').eq('id', user.id).single();
+                final currentCoins = (currentCoinsResponse['coins'] ?? 0) as int;
+                
+                // 2. Update coins
+                await supabase.from('profiles').update({'coins': currentCoins + coins}).eq('id', user.id);
+
+                // 3. Log transaction
+                await supabase.from('coin_transactions').insert({
+                  'user_id': user.id,
+                  'amount': coins,
+                  'type': 'reward',
+                  'description': note.isNotEmpty ? note : 'Manual EcoBin collection',
+                  'weight': liveWeight,
+                });
+
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('✅ $coins Coins awarded to ${user.fullName}!')),
+                  );
+                }
+              } catch (e) {
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              }
+            },
+            child: const Text('Award Now'),
+          ),
+        ],
+      ),
     );
   }
 }

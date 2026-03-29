@@ -8,6 +8,7 @@ import 'features/public/presentation/pages/public_dashboard.dart';
 import 'features/home/presentation/pages/customer_home.dart';
 import 'features/home/presentation/pages/collector_home.dart';
 import 'services/deep_link_service.dart';
+import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +17,8 @@ void main() async {
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
   );
+
+  await NotificationService.init();
 
   runApp(
     const ProviderScope(
@@ -78,8 +81,10 @@ class AuthGate extends ConsumerWidget {
         // If NOT logged in, show the Public Landing Dashboard
         return const PublicDashboard();
       },
-      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
-      error: (e, _) => const PublicDashboard(), // Fallback to public on error
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: AppTheme.primaryColor)),
+      ),
+      error: (e, _) => const PublicDashboard(),
     );
   }
 }

@@ -9,6 +9,7 @@ import '../../../insights/presentation/pages/insights_page.dart';
 import '../../../rewards/presentation/pages/rewards_page.dart';
 import '../../../map/presentation/pages/map_page.dart';
 import '../../../public/presentation/pages/qr_scanner_screen.dart';
+import '../../../hardware/presentation/pages/live_hardware_page.dart';
 
 class CustomerHome extends ConsumerStatefulWidget {
   const CustomerHome({super.key});
@@ -64,6 +65,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
             onRefresh: () async {
               ref.invalidate(profileProvider);
               ref.invalidate(userBinsProvider);
+              ref.invalidate(coinTransactionsProvider);
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -74,6 +76,8 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
                   _buildHeader(name),
                   const SizedBox(height: 24),
                   _buildWalletCard(coins),
+                  const SizedBox(height: 24),
+                  _buildRewardTimeline(),
                   const SizedBox(height: 24),
                   _buildBinSection(binsAsync),
                   const SizedBox(height: 24),
@@ -168,6 +172,129 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
         ],
       ),
     );
+  }
+
+  Widget _buildRewardTimeline() {
+    final transactionsAsync = ref.watch(coinTransactionsProvider);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.timeline, color: AppTheme.accentColor, size: 20),
+            const SizedBox(width: 8),
+            const Text('Reward Timeline', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            Text('Recent', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4))),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text('Points awarded by workers for your deposits', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4))),
+        const SizedBox(height: 16),
+        transactionsAsync.when(
+          data: (transactions) {
+            if (transactions.isEmpty) {
+              return GlassCard(
+                padding: const EdgeInsets.symmetric(vertical: 32),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.history, size: 40, color: Colors.white.withValues(alpha: 0.1)),
+                      const SizedBox(height: 12),
+                      const Text('No rewards yet', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text('Deposit waste to earn EcoCoins!', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4))),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return Column(
+              children: transactions.take(5).map((tx) {
+                final amount = (tx['amount'] as num?)?.toInt() ?? 0;
+                final description = tx['description']?.toString() ?? 'Reward';
+                final weight = (tx['weight'] as num?)?.toDouble();
+                final createdAt = DateTime.tryParse(tx['created_at'] ?? '') ?? DateTime.now();
+                final timeAgo = _formatTimeAgo(createdAt);
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: GlassCard(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Timeline dot
+                        Container(
+                          width: 36, height: 36,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.stars, color: AppTheme.accentColor, size: 18),
+                        ),
+                        const SizedBox(width: 12),
+                        // Details
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text('+$amount', style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.accentColor,
+                                  )),
+                                  const Text(' EcoCoins', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                                  const Spacer(),
+                                  Text(timeAgo, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              // Worker's note
+                              Text(description, style: TextStyle(
+                                fontSize: 13, color: Colors.white.withValues(alpha: 0.7),
+                              )),
+                              if (weight != null && weight > 0) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text('⚖️ ${weight.toStringAsFixed(0)}g deposited',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.primaryColor)),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            );
+          },
+          loading: () => const Center(child: Padding(
+            padding: EdgeInsets.all(24),
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )),
+          error: (e, _) => const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+
+  String _formatTimeAgo(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   Widget _buildBinSection(AsyncValue<List<SmartBin>> binsAsync) {
@@ -355,6 +482,15 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
           children: [
             Expanded(
               child: _ActionCard(
+                icon: Icons.sensors,
+                label: 'Live Hardware',
+                color: AppTheme.primaryColor,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LiveHardwarePage())),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ActionCard(
                 icon: Icons.map_outlined,
                 label: 'Bin Map',
                 color: AppTheme.secondaryColor,
@@ -368,19 +504,6 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
                 label: 'Rewards',
                 color: AppTheme.accentColor,
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RewardsPage())),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _ActionCard(
-                icon: Icons.shopping_bag_outlined,
-                label: 'Order Bin',
-                color: Colors.purpleAccent,
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('🛒 Order feature coming soon!')),
-                  );
-                },
               ),
             ),
           ],

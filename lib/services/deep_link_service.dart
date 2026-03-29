@@ -15,12 +15,14 @@ class DeepLinkService {
   void init(BuildContext context) {
     // 1. Handle deep link when the app is already open
     _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
-      _handleUri(context, uri);
+      if (context.mounted) {
+        _handleUri(context, uri);
+      }
     });
 
     // 2. Handle deep link when the app is launched from cold start
     _appLinks.getInitialLink().then((uri) {
-      if (uri != null) {
+      if (uri != null && context.mounted) {
         _handleUri(context, uri);
       }
     });

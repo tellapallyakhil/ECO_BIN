@@ -29,7 +29,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             email: _emailController.text.trim(),
             password: _passwordController.text.trim(),
           );
-      // Auth state listener in main.dart will handle routing
+      // Pop back to root – AuthGate will detect session and route to dashboard
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } catch (e) {
       _showError(e.toString());
     } finally {

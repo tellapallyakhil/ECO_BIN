@@ -6,7 +6,6 @@ import '../../../../shared/widgets/glass_card.dart';
 import '../../../../providers/app_providers.dart';
 import '../../../auth/presentation/pages/login_page.dart';
 import '../../../auth/presentation/pages/signup_page.dart';
-import '../../../deposit/presentation/pages/deposit_screen.dart';
 import 'qr_scanner_screen.dart';
 
 class PublicDashboard extends ConsumerWidget {
@@ -146,7 +145,14 @@ class PublicDashboard extends ConsumerWidget {
               data: downloadUrl,
               version: QrVersions.auto,
               size: 200.0,
-              foregroundColor: Colors.black,
+              eyeStyle: const QrEyeStyle(
+                eyeShape: QrEyeShape.square,
+                color: Colors.black,
+              ),
+              dataModuleStyle: const QrDataModuleStyle(
+                dataModuleShape: QrDataModuleShape.square,
+                color: Colors.black,
+              ),
             ),
           ),
 
