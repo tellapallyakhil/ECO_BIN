@@ -10,6 +10,7 @@ import '../../../rewards/presentation/pages/rewards_page.dart';
 import '../../../map/presentation/pages/map_page.dart';
 import '../../../public/presentation/pages/qr_scanner_screen.dart';
 import '../../../hardware/presentation/pages/live_hardware_page.dart';
+import '../../../../services/location_service.dart';
 
 class CustomerHome extends ConsumerStatefulWidget {
   const CustomerHome({super.key});
@@ -24,6 +25,8 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkFullBinNotification();
+      // 📍 Sync current location as the bin location
+      LocationService.syncBinLocationWithUser();
     });
   }
 
@@ -66,6 +69,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
               ref.invalidate(profileProvider);
               ref.invalidate(userBinsProvider);
               ref.invalidate(coinTransactionsProvider);
+              ref.invalidate(leaderboardProvider);
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -73,7 +77,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeader(name),
+                  _buildHeader(name, ref.watch(currentUserProvider)?.id ?? ''),
                   const SizedBox(height: 24),
                   _buildWalletCard(coins),
                   const SizedBox(height: 24),
@@ -94,7 +98,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
     );
   }
 
-  Widget _buildHeader(String name) {
+  Widget _buildHeader(String name, String id) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -102,9 +106,14 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Welcome back,', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 14)),
-              const SizedBox(height: 4),
-              Text(name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+              Text('Welcome back,', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13)),
+              Row(
+                children: [
+                  Text(name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 8),
+                  Text('[ID: ${id.substring(0, 4)}]', style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.2))),
+                ],
+              ),
             ],
           ),
         ),
@@ -155,8 +164,23 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('EcoCoins', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13)),
-                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text('EcoCoins', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13)),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.sync, size: 14, color: AppTheme.primaryColor),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        ref.invalidate(profileProvider);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Refreshing balance...'), duration: Duration(milliseconds: 500)),
+                        );
+                      },
+                    ),
+                  ],
+                ),
                 Text('$coins', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
               ],
             ),
@@ -344,7 +368,8 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
   }
   Widget _buildBinCard(dynamic bin) {
     final pct = bin.fillPercentage as double;
-    final color = pct >= 0.85 ? AppTheme.errorColor : (pct >= 0.6 ? AppTheme.accentColor : AppTheme.primaryColor);
+    // Color logic: Green(0-80g=40%), Orange(80-125g=62.5%), Red(125g+=62.5%+)
+    final color = pct >= 0.625 ? AppTheme.errorColor : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -379,7 +404,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    pct >= 0.85 ? '⚠️ FULL' : 'ACTIVE',
+                    pct >= 0.625 ? '⚠️ FULL' : 'ACTIVE',
                     style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -425,13 +450,13 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
                   Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.1)),
                   _buildSensorData(Icons.speed, 'Threshold', '${bin.threshold} kg', Colors.grey),
                   Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.1)),
-                  _buildSensorData(Icons.solar_power, 'Solar', '92%', AppTheme.accentColor),
+                  _buildSensorData(Icons.pie_chart, 'Fill', '${(pct * 100).toInt()}%', color),
                 ],
               ),
             ),
 
             // Alert if full
-            if (pct >= 0.85) ...[
+            if (pct >= 0.625) ...[
               const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(12),

@@ -11,6 +11,8 @@ import '../../../insights/presentation/pages/insights_page.dart';
 import 'collection_completed_screen.dart';
 import '../../../hardware/presentation/pages/live_hardware_page.dart';
 import '../../../../services/notification_service.dart';
+import '../../../../services/location_service.dart';
+import '../../../../core/constants.dart';
 
 class CollectorHome extends ConsumerStatefulWidget {
   const CollectorHome({super.key});
@@ -23,11 +25,12 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   @override
   void initState() {
     super.initState();
+    
     // 🔔 Register a background listener for the Sensor Data
     ref.listenManual(liveHardwareProvider, (previous, next) {
       next.whenData((data) async {
-        if (data != null && data.weight >= 600) {
-          // Trigger 600g BUZZER Alert!
+        if (data != null && data.weight >= AppConstants.fullAlertGrams) {
+          // Trigger 200g FULL Alert!
           await NotificationService.showFullBinAlert(
             binLocation: 'Eco Bin (Live Hardware)',
             binId: 'Hardware_Bin_01',
@@ -359,7 +362,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
         allBinsAsync.when(
           data: (bins) {
             final visibleBins = bins.where((bin) {
-              final isFull = bin.fillPercentage >= 0.85;
+              final isFull = bin.fillPercentage >= 0.625;
               final claimant = claimedBins[bin.id];
 
               if (isFull) {
@@ -403,7 +406,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
 
   Widget _buildBinDetailCard(dynamic bin, String userId) {
     final pct = bin.fillPercentage;
-    final color = pct >= 0.85 ? AppTheme.errorColor : (pct >= 0.6 ? AppTheme.accentColor : AppTheme.primaryColor);
+    final color = pct >= 0.625 ? AppTheme.errorColor : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -462,7 +465,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    pct >= 0.85 ? '⚠️ FULL' : (pct >= 0.6 ? 'FILLING' : 'OK'),
+                    pct >= 0.625 ? '⚠️ FULL' : (pct >= 0.4 ? 'FILLING' : 'OK'),
                     style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -482,11 +485,11 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                   Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
                   _WasteDetail(icon: Icons.speed, label: 'Threshold', value: '${bin.threshold} kg'),
                   Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
-                  _WasteDetail(icon: Icons.solar_power, label: 'Solar', value: '92%'),
+                  _WasteDetail(icon: Icons.pie_chart, label: 'Fill', value: '${(pct * 100).toInt()}%'),
                 ],
               ),
             ),
-            if (pct >= 0.85) ...[
+            if (pct >= 0.625) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -620,7 +623,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                           color: AppTheme.accentColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text('2m Session', style: TextStyle(color: AppTheme.accentColor, fontSize: 8, fontWeight: FontWeight.bold)),
+                        child: Text('${DateTime.now().difference(req.createdAt).inMinutes}m ago', style: const TextStyle(color: AppTheme.accentColor, fontSize: 8, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -640,14 +643,16 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                 ],
               ),
             ),
-            ElevatedButton(
+            ElevatedButton.icon(
+              icon: const Icon(Icons.stars, size: 14),
+              label: const Text('Award Coins', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               onPressed: () => _showCoinAssignmentDialog(req),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                backgroundColor: AppTheme.accentColor,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              child: const Text('Review', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -656,7 +661,10 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   }
 
   void _showCoinAssignmentDialog(CollectionRequest req) {
-    final coinsController = TextEditingController(text: '${(req.weight * 10).toInt()}');
+    // Calculate coins based on weight in grams (0.5 coins per gram)
+    final calculatedCoins = AppConstants.calculateCoins(req.weight);
+    
+    final coinsController = TextEditingController(text: '$calculatedCoins');
     final noteController = TextEditingController();
     final liveData = ref.read(liveHardwareProvider).value;
     final liveWeight = liveData?.weight ?? req.weight;
@@ -774,10 +782,18 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               try {
                 final supabase = ref.read(supabaseProvider);
                 
-                // 1. Update user coins
+                // 1. Update user coins (Verified Update)
                 final userProfile = await supabase.from('profiles').select('coins').eq('id', req.userId).maybeSingle();
                 final currentCoins = (userProfile?['coins'] ?? 0) as int;
-                await supabase.from('profiles').update({'coins': currentCoins + coins}).eq('id', req.userId);
+                
+                final updateResult = await supabase.from('profiles')
+                    .update({'coins': currentCoins + coins})
+                    .eq('id', req.userId)
+                    .select();
+                
+                if (updateResult.isEmpty) {
+                  throw Exception('Permission Denied: Database prevented balance update. Only the user or an admin can update coins.');
+                }
 
                 // 2. Log transaction with note, weight, and timestamp
                 await supabase.from('coin_transactions').insert({
@@ -796,9 +812,16 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                 }
                 if (mounted) {
                   ref.invalidate(pendingCollectionsProvider);
+                  ref.invalidate(allUsersProvider);
+                  // Ensure the profile stream refreshes across all views
                   ref.invalidate(profileProvider);
+                  ref.invalidate(coinTransactionsProvider);
+                  ref.invalidate(allBinsProvider);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('✅ $coins Coins awarded to ${req.userName}! Note: $note')),
+                    SnackBar(
+                      content: Text('🎉 $coins EcoCoins awarded to ${req.userName}!'),
+                      backgroundColor: AppTheme.primaryColor,
+                    ),
                   );
                 }
               } catch (e) {
@@ -898,42 +921,53 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                 ),
               );
             }
-            return SizedBox(
-              height: 110,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: users.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  final user = users[index];
-                  return GestureDetector(
-                    onTap: () => _showManualCoinAwardDialog(user),
-                    child: Column(
-                      children: [
-                        CircleAvatar(
-                          radius: 30,
-                          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
-                          child: Text(
-                            user.fullName.isNotEmpty ? user.fullName[0].toUpperCase() : '?',
-                            style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
-                          ),
+            return Column(
+              children: users.map((user) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GlassCard(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
+                        child: Text(
+                          user.fullName.isNotEmpty ? user.fullName[0].toUpperCase() : '?',
+                          style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 13),
                         ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: 70,
-                          child: Text(
-                            user.fullName,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
-                          ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(user.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                const SizedBox(width: 4),
+                                Text('[ID: ${user.id.substring(0, 4)}]', style: TextStyle(fontSize: 8, color: Colors.white.withValues(alpha: 0.3))),
+                              ],
+                            ),
+                            Text('${user.coins} EcoCoins', style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+                          ],
                         ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                      ),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.add, size: 14),
+                        label: const Text('Reward', style: TextStyle(fontSize: 11)),
+                        onPressed: () => _showManualCoinAwardDialog(user),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                          foregroundColor: AppTheme.primaryColor,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          elevation: 0,
+                          side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )).toList(),
             );
           },
           loading: () => const Center(child: LinearProgressIndicator(minHeight: 2)),
@@ -1017,12 +1051,19 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               try {
                 final supabase = ref.read(supabaseProvider);
                 
-                // 1. Get current coins 
+                // 1. Get current coins (Verified Update)
                 final currentCoinsResponse = await supabase.from('profiles').select('coins').eq('id', user.id).single();
                 final currentCoins = (currentCoinsResponse['coins'] ?? 0) as int;
                 
-                // 2. Update coins
-                await supabase.from('profiles').update({'coins': currentCoins + coins}).eq('id', user.id);
+                // 2. Perform Verified Update
+                final updateResult = await supabase.from('profiles')
+                    .update({'coins': currentCoins + coins})
+                    .eq('id', user.id)
+                    .select();
+                
+                if (updateResult.isEmpty) {
+                  throw Exception('Database REFUSED to update balance. Please check your Supabase RLS policies for profiles!');
+                }
 
                 // 3. Log transaction
                 await supabase.from('coin_transactions').insert({
@@ -1030,11 +1071,18 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                   'amount': coins,
                   'type': 'reward',
                   'description': note.isNotEmpty ? note : 'Manual EcoBin collection',
-                  'weight': liveWeight,
                 });
 
                 if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
+                }
+                
+                if (mounted) {
+                  // CRITICAL: Refresh the user list so the 100 coins appear instantly!
+                  ref.invalidate(allUsersProvider);
+                  ref.invalidate(profileProvider);
+                  ref.invalidate(coinTransactionsProvider);
+                  
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('✅ $coins Coins awarded to ${user.fullName}!')),
                   );

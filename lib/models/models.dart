@@ -61,7 +61,7 @@ class SmartBin {
       latitude: (map['location_lat'] as num?)?.toDouble() ?? 0.0,
       longitude: (map['location_lng'] as num?)?.toDouble() ?? 0.0,
       currentWeight: (map['current_weight'] as num?)?.toDouble() ?? 0.0,
-      threshold: (map['threshold'] as num?)?.toDouble() ?? 10.0,
+      threshold: (map['threshold'] as num?)?.toDouble() ?? 0.2,
       isFull: map['is_full'] ?? false,
       lastCollectedAt: map['last_collected_at'] != null
           ? DateTime.tryParse(map['last_collected_at'])

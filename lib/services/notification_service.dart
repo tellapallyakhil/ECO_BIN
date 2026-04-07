@@ -39,7 +39,7 @@ class NotificationService {
     await _notifications.show(
       binId.hashCode, // Unique ID per bin
       '⚠️ BIN FULL DETECTED!',
-      'Bin at $binLocation is ready for collection (600g).',
+      'Bin at $binLocation is ready for collection (200g+)!',
       details,
     );
 

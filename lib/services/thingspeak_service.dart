@@ -32,17 +32,15 @@ class ThingSpeakBinData {
     }
   }
 
-  /// Fill percentage (0.0 to 1.0) based on new weight thresholds
+  /// Fill percentage (0.0 to 1.0) based on 200g bin capacity
   double get fillPercentage {
-    if (weight >= 600) return 1.0;
-    if (weight >= 300) return 0.5;
-    return weight / 600.0; // Linear fill for low weights
+    return (weight / 200.0).clamp(0.0, 1.0);
   }
 
-  /// Color logic based on weight: 0=Green, 300=Yellow, 600=Red
+  /// Color logic: 0-80g=Green, 80-125g=Orange, 125g+=Red
   Color get statusColor {
-    if (weight >= 600) return const Color(0xFFEF4444); // Red
-    if (weight >= 300) return const Color(0xFFFBBF24); // Yellow
+    if (weight >= 125) return const Color(0xFFEF4444); // Red
+    if (weight >= 80) return const Color(0xFFFBBF24);  // Orange
     return const Color(0xFF10B981); // Green
   }
 

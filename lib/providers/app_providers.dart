@@ -21,31 +21,31 @@ final currentUserProvider = Provider<User?>((ref) {
   return authAsync.value?.session?.user ?? Supabase.instance.client.auth.currentUser;
 });
 
-// Profile provider - Pure Supabase fetch
-final profileProvider = FutureProvider<AppUser>((ref) async {
+// Profile provider - Real-time stream for instant balance updates
+final profileProvider = StreamProvider<AppUser>((ref) {
   final user = ref.watch(currentUserProvider);
-  if (user == null) throw Exception('Not authenticated');
+  if (user == null) {
+    return Stream.value(AppUser(id: '', fullName: 'Guest', email: '', role: 'customer', coins: 0));
+  }
 
   final supabase = ref.watch(supabaseProvider);
   
-  final response = await supabase
+  return supabase
       .from('profiles')
-      .select()
+      .stream(primaryKey: ['id'])
       .eq('id', user.id)
-      .maybeSingle();
-
-  if (response != null) {
-    return AppUser.fromMap(response);
-  }
-
-  // If no profile exists, we attempt to use meta-data as a fallback
-  return AppUser(
-    id: user.id,
-    fullName: user.userMetadata?['full_name'] ?? 'User',
-    email: user.email ?? '',
-    role: user.userMetadata?['role'] ?? 'customer',
-    coins: 0,
-  );
+      .map((event) {
+        if (event.isNotEmpty) {
+          return AppUser.fromMap(event.first);
+        }
+        return AppUser(
+          id: user.id,
+          fullName: user.userMetadata?['full_name'] ?? 'User',
+          email: user.email ?? '',
+          role: user.userMetadata?['role'] ?? 'customer',
+          coins: 0,
+        );
+      });
 });
 
 // Real Smart Bins for current user (Customer)
@@ -110,7 +110,7 @@ final availableAreasProvider = Provider<AsyncValue<List<String>>>((ref) {
 // Logic for alerted bins
 final alertBinsProvider = FutureProvider<List<SmartBin>>((ref) async {
   final allBins = await ref.watch(allBinsProvider.future);
-  return allBins.where((b) => b.fillPercentage >= 0.85).toList();
+  return allBins.where((b) => b.fillPercentage >= 0.625).toList();
 });
 
 // Real Rewards from DB
@@ -123,35 +123,34 @@ final rewardsProvider = FutureProvider<List<Reward>>((ref) async {
   return (response as List).map((e) => Reward.fromMap(e)).toList();
 });
 
-// Fetch all registered customers for workers to see
-final allUsersProvider = FutureProvider<List<AppUser>>((ref) async {
-  final supabase = ref.read(supabaseProvider);
-  print('DEBUG: Fetching all profiles from Supabase...');
+// Fetch all registered customers for workers to see (Real-time stream)
+final allUsersProvider = StreamProvider<List<AppUser>>((ref) {
+  final supabase = ref.watch(supabaseProvider);
   
-  final response = await supabase
+  return supabase
       .from('profiles')
-      .select()
-      .order('full_name', ascending: true);
-  
-  final users = (response as List).map((e) => AppUser.fromMap(e)).toList();
-  final customers = users.where((u) => u.role != 'collector').toList();
-  
-  print('DEBUG: Found ${users.length} total profiles, ${customers.length} are customers.');
-  return customers;
+      .stream(primaryKey: ['id'])
+      .order('full_name', ascending: true)
+      .map((event) {
+        return event
+            .map((e) => AppUser.fromMap(e))
+            .where((u) => u.role != 'collector')
+            .toList();
+      });
 });
 
-// Collection Requests (for manual verification)
-final pendingCollectionsProvider = FutureProvider<List<CollectionRequest>>((ref) async {
-  print('DEBUG: Fetching pending collection requests...');
-  final response = await ref
-      .read(supabaseProvider)
-      .from('collection_requests')
-      .select()
-      .eq('status', 'pending')
-      .order('created_at', ascending: false);
+// Collection Requests (for manual verification - Real-time stream)
+final pendingCollectionsProvider = StreamProvider<List<CollectionRequest>>((ref) {
+  final supabase = ref.watch(supabaseProvider);
   
-  print('DEBUG: Found ${(response as List).length} pending collection requests.');
-  return (response as List).map((e) => CollectionRequest.fromMap(e)).toList();
+  return supabase
+      .from('collection_requests')
+      .stream(primaryKey: ['id'])
+      .eq('status', 'pending')
+      .order('created_at', ascending: false)
+      .map((event) {
+        return event.map((e) => CollectionRequest.fromMap(e)).toList();
+      });
 });
 
 // Optimized Sign Out 
@@ -213,3 +212,21 @@ final latestHardwareProvider = FutureProvider<ThingSpeakBinData?>((ref) async {
 final hardwareHistoryProvider = FutureProvider<List<ThingSpeakBinData>>((ref) async {
   return await ThingSpeakService.fetchHistory(results: 50);
 });
+
+// ════════════════════════════════════════════════════════
+//  LEADERBOARD — All users ranked by coins (scalable)
+// ════════════════════════════════════════════════════════
+
+final leaderboardProvider = FutureProvider<List<AppUser>>((ref) async {
+  final supabase = ref.read(supabaseProvider);
+
+  final response = await supabase
+      .from('profiles')
+      .select()
+      .eq('role', 'customer')
+      .order('coins', ascending: false)
+      .limit(50);
+
+  return (response as List).map((e) => AppUser.fromMap(e)).toList();
+});
+

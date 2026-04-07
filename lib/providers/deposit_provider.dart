@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/constants.dart';
 
 /// Tracks a plastic deposit session
 class DepositSession {
@@ -15,8 +16,8 @@ class DepositSession {
     this.isActive = true,
   });
 
-  double get depositedWeight => (endWeight != null) ? (endWeight! - startWeight).clamp(0.0, 100.0) : 0.0;
-  int get earnedCoins => (depositedWeight * 10).toInt(); // 10 coins per kg
+  double get depositedWeight => (endWeight != null) ? (endWeight! - startWeight).clamp(0.0, 500.0) : 0.0;
+  int get earnedCoins => AppConstants.calculateCoins(depositedWeight); // 0.5 coins per gram
 }
 
 /// Manages deposit session state
@@ -32,10 +33,12 @@ class DepositNotifier extends Notifier<DepositSession?> {
     );
   }
 
-  /// Finish the deposit: create a request for worker to verify
+  /// Finish the deposit: create a record and notify workers
   Future<void> finishDeposit(double newWeight) async {
     if (state == null) return;
 
+    final deposited = (newWeight - state!.startWeight).clamp(0.0, 100.0);
+    
     final session = DepositSession(
       binId: state!.binId,
       startWeight: state!.startWeight,
@@ -43,28 +46,46 @@ class DepositNotifier extends Notifier<DepositSession?> {
       isActive: false,
     );
 
-    final deposited = session.depositedWeight;
-
-    // Create a collection request for the worker to verify
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user != null && deposited > 0.1) { // Only if some plastic was added
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    
+    if (user != null && deposited > 0.001) { // Precision check for small deposits
       try {
-        // Fetch bin location for context
-        final binResponse = await Supabase.instance.client
+        final binId = state!.binId;
+        
+        // 1. Fetch bin info for context
+        final binResponse = await supabase
             .from('smart_bins')
             .select('location_name')
-            .eq('id', session.binId)
+            .eq('id', binId)
             .maybeSingle();
 
-        await Supabase.instance.client.from('collection_requests').insert({
+        // 2. Insert into collection_requests (for worker approval/audit)
+        await supabase.from('collection_requests').insert({
           'user_id': user.id,
           'user_name': user.userMetadata?['full_name'] ?? 'Guest User',
-          'bin_id': session.binId,
-          'bin_location': binResponse?['location_name'] ?? 'Bin #${session.binId}',
-          'weight': deposited,
+          'bin_id': binId,
+          'bin_location': binResponse?['location_name'] ?? 'Bin #$binId',
+          'weight': deposited, // Recorded in grams (hardware scale unit)
           'status': 'pending',
         });
-      } catch (_) {}
+
+        // 3. Log into historical audit table for analytics
+        try {
+          await supabase.from('deposit_history').insert({
+            'user_id': user.id,
+            'bin_id': binId,
+            'weight_grams': (deposited * 1000).toInt(),
+            'start_weight': state!.startWeight,
+            'end_weight': newWeight,
+          });
+        } catch (_) {
+          // Table may not exist yet — silent fail is OK
+        }
+
+      } catch (e) {
+        // Log error and handle fail
+      }
     }
 
     state = session;

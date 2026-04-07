@@ -72,6 +72,11 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
       final bins = await ref.read(allBinsProvider.future);
       final bin = bins.firstWhere((b) => b.id == widget.binId, orElse: () => bins.first);
       await ref.read(depositProvider.notifier).finishDeposit(bin.currentWeight);
+      
+      // Refresh all data so home screen shows updated info
+      ref.invalidate(userBinsProvider);
+      ref.invalidate(coinTransactionsProvider);
+      ref.invalidate(pendingCollectionsProvider);
     } catch (_) {}
   }
 

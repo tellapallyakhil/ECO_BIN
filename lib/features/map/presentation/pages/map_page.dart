@@ -4,21 +4,38 @@ import 'package:latlong2/latlong.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../providers/app_providers.dart';
 import '../../../../core/app_theme.dart';
+import '../../../../core/constants.dart';
 import '../../../../shared/widgets/glass_card.dart';
+import '../../../../services/location_service.dart';
 import '../../../../models/models.dart';
 
-class MapPage extends ConsumerWidget {
+class MapPage extends ConsumerStatefulWidget {
   const MapPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MapPage> createState() => _MapPageState();
+}
+
+class _MapPageState extends ConsumerState<MapPage> {
+  final MapController _mapController = MapController();
+  LatLng _selectedLocation = const LatLng(17.3850, 78.4867);
+  bool _isSelectionMode = false;
+  String _locationName = "Manually Selected Location";
+
+  @override
+  Widget build(BuildContext context) {
     final binsAsync = ref.watch(allBinsProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bin Locations'),
+        title: Text(_isSelectionMode ? 'Select Location' : 'Bin Locations'),
         backgroundColor: AppTheme.surfaceColor,
         actions: [
+          if (!_isSelectionMode)
+            IconButton(
+              icon: const Icon(Icons.add_location_alt, color: AppTheme.accentColor),
+              onPressed: () => setState(() => _isSelectionMode = true),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(allBinsProvider),
@@ -30,7 +47,70 @@ class MapPage extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
       ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            mini: true,
+            onPressed: _centerOnUser,
+            backgroundColor: AppTheme.surfaceColor,
+            child: const Icon(Icons.my_location, color: Colors.white, size: 20),
+          ),
+          const SizedBox(height: 12),
+          if (_isSelectionMode)
+            FloatingActionButton.extended(
+              onPressed: _saveNewLocation,
+              label: const Text('Confirm Location'),
+              icon: const Icon(Icons.check),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+        ],
+      ),
     );
+  }
+
+  Future<void> _centerOnUser() async {
+    final pos = await LocationService.getCurrentPosition();
+    if (pos != null) {
+      _mapController.move(LatLng(pos.latitude, pos.longitude), 15);
+      if (_isSelectionMode) {
+        _selectedLocation = LatLng(pos.latitude, pos.longitude);
+      }
+    }
+  }
+
+
+  Future<void> _saveNewLocation() async {
+    // Logic to save the selected location to Supabase
+    final supabase = ref.read(supabaseProvider);
+    final user = ref.read(currentUserProvider);
+
+    if (user == null) return;
+
+    try {
+      await supabase.from('smart_bins').insert({
+        'owner_id': user.id,
+        'location_lat': _selectedLocation.latitude,
+        'location_lng': _selectedLocation.longitude,
+        'location_name': _locationName,
+        'current_weight': 0.0,
+        'threshold': AppConstants.defaultThresholdKg,
+      });
+
+      if (mounted) {
+        setState(() => _isSelectionMode = false);
+        ref.invalidate(allBinsProvider);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ New bin location added successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error saving location: $e')),
+        );
+      }
+    }
   }
 
   Widget _buildMap(BuildContext context, List<SmartBin> bins) {
@@ -45,17 +125,28 @@ class MapPage extends ConsumerWidget {
       return Stack(
         children: [
           FlutterMap(
+            mapController: _mapController,
             options: MapOptions(
-              initialCenter: center, 
+              initialCenter: center,
               initialZoom: 12,
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all,
-              ),
+              onPositionChanged: (position, hasGesture) {
+                if (hasGesture && _isSelectionMode) {
+                  _selectedLocation = position.center!;
+                }
+              },
             ),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.eco.bin.eco_bin',
               ),
+              if (_isSelectionMode)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 35),
+                    child: Icon(Icons.location_on, color: AppTheme.errorColor, size: 40),
+                  ),
+                ),
             ],
           ),
           Center(
@@ -79,9 +170,9 @@ class MapPage extends ConsumerWidget {
 
     final markers = bins.map<Marker>((bin) {
       final pct = bin.fillPercentage;
-      final color = pct >= 0.85
+      final color = pct >= 0.625
           ? AppTheme.errorColor
-          : (pct >= 0.6 ? AppTheme.accentColor : AppTheme.primaryColor);
+          : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
 
       return Marker(
         point: LatLng(bin.latitude, bin.longitude),
@@ -114,19 +205,29 @@ class MapPage extends ConsumerWidget {
     return Stack(
       children: [
         FlutterMap(
+          mapController: _mapController,
           options: MapOptions(
             initialCenter: center,
             initialZoom: 13,
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all,
-            ),
+            onPositionChanged: (position, hasGesture) {
+              if (hasGesture && _isSelectionMode) {
+                _selectedLocation = position.center!;
+              }
+            },
           ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.eco.bin',
+              userAgentPackageName: 'com.eco.bin.eco_bin',
             ),
             MarkerLayer(markers: markers),
+            if (_isSelectionMode)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 35),
+                  child: Icon(Icons.location_on, color: AppTheme.errorColor, size: 40),
+                ),
+              ),
           ],
         ),
         // Legend
@@ -163,9 +264,9 @@ class MapPage extends ConsumerWidget {
 
   void _showBinDetails(BuildContext context, SmartBin bin) {
     final pct = bin.fillPercentage;
-    final color = pct >= 0.85
+    final color = pct >= 0.625
         ? AppTheme.errorColor
-        : (pct >= 0.6 ? AppTheme.accentColor : AppTheme.primaryColor);
+        : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
 
     showModalBottomSheet(
       context: context,
@@ -207,7 +308,7 @@ class MapPage extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
                   child: Text(
-                    pct >= 0.85 ? 'FULL' : 'ACTIVE',
+                    pct >= 0.625 ? 'FULL' : 'ACTIVE',
                     style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -231,7 +332,7 @@ class MapPage extends ConsumerWidget {
                 const SizedBox(width: 12),
                 Expanded(child: _detailTile('Longitude', bin.longitude.toStringAsFixed(4), Icons.explore)),
                 const SizedBox(width: 12),
-                Expanded(child: _detailTile('Solar', '92%', Icons.solar_power)),
+                Expanded(child: _detailTile('Status', bin.isFull ? 'FULL' : 'ACTIVE', Icons.info_outline)),
               ],
             ),
             const SizedBox(height: 20),
@@ -247,7 +348,7 @@ class MapPage extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              pct >= 0.85
+              pct >= 0.625
                   ? '⚠️ This bin needs immediate collection!'
                   : 'Bin is operating normally.',
               style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.6)),
