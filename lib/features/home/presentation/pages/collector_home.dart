@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../../../../providers/app_providers.dart';
 import '../../../../core/app_theme.dart';
 import '../../../../shared/widgets/glass_card.dart';
@@ -645,7 +647,9 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
     final color = pct >= 0.625 ? AppTheme.errorColor : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
     final isFull = liveWeightGrams >= AppConstants.fullAlertGrams;
 
-    return Padding(
+    return GestureDetector(
+      onTap: () => _showBinLocationSheet(bin, liveWeightGrams, pct, color, isFull),
+      child: Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassCard(
         padding: const EdgeInsets.all(16),
@@ -788,6 +792,217 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               ),
             ],
           ],
+        ),
+      ),
+      ),
+    );
+  }
+
+  /// Opens a bottom sheet showing the bin's location on a map with directions
+  void _showBinLocationSheet(dynamic bin, double weightGrams, double fillPct, Color statusColor, bool isFull) {
+    final lat = bin.latitude as double;
+    final lng = bin.longitude as double;
+    final hasLocation = lat != 0.0 || lng != 0.0;
+    final binName = bin.locationName ?? 'Unknown Bin';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle bar
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+
+                // Header
+                Row(
+                  children: [
+                    Icon(Icons.location_on, color: statusColor, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(binName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('Bin #${bin.id.toString().substring(0, 8)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        isFull ? '🚨 FULL' : '${(fillPct * 100).toInt()}%',
+                        style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Embedded Map
+                if (hasLocation)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: SizedBox(
+                      height: 220,
+                      child: FlutterMap(
+                        options: MapOptions(
+                          initialCenter: LatLng(lat, lng),
+                          initialZoom: 15,
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.ecobin.app',
+                          ),
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                point: LatLng(lat, lng),
+                                width: 50,
+                                height: 50,
+                                child: Column(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: statusColor,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '${(fillPct * 100).toInt()}%',
+                                        style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    Icon(Icons.location_on, color: statusColor, size: 28),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.location_off, color: Colors.grey, size: 32),
+                          SizedBox(height: 8),
+                          Text('No GPS location available', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 20),
+
+                // Weight & Fill details
+                GlassCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _WasteDetail(icon: Icons.scale, label: 'Weight', value: '${weightGrams.toStringAsFixed(1)}g'),
+                      Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
+                      _WasteDetail(icon: Icons.speed, label: 'Capacity', value: '${AppConstants.binCapacityGrams.toInt()}g'),
+                      Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
+                      _WasteDetail(icon: Icons.pie_chart, label: 'Fill', value: '${(fillPct * 100).toInt()}%'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // GPS coordinates
+                if (hasLocation)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.gps_fixed, size: 14, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}',
+                          style: const TextStyle(fontSize: 12, color: Colors.grey, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 12),
+
+                // Action buttons
+                if (hasLocation)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.directions, size: 20),
+                      label: const Text('Get Directions in Google Maps'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _navigateToGoogleMaps(lat, lng, binName);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.map, size: 18),
+                    label: const Text('View All Bins on Map'),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const MapPage()));
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
