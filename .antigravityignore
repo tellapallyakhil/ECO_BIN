@@ -1,0 +1,11 @@
+# Exclude build artifacts and tool data to reduce memory usage
+build/
+.dart_tool/
+android/
+ios/
+test/
+web/
+windows/
+.git/
+.idea/
+*.log

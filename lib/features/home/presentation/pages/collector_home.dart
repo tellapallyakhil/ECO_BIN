@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../providers/app_providers.dart';
 import '../../../../core/app_theme.dart';
 import '../../../../shared/widgets/glass_card.dart';
@@ -14,6 +15,14 @@ import '../../../../services/notification_service.dart';
 import '../../../../services/location_service.dart';
 import '../../../../core/constants.dart';
 
+/// Opens a URL externally (Google Maps, browser, etc.)
+Future<void> launchUrlExternally(String url) async {
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
+
 class CollectorHome extends ConsumerStatefulWidget {
   const CollectorHome({super.key});
 
@@ -26,14 +35,26 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   void initState() {
     super.initState();
     
+    // Register notification tap callback for navigation
+    NotificationService.onNavigateToBin = (lat, lng, location) {
+      if (mounted) {
+        _navigateToGoogleMaps(lat, lng, location);
+      }
+    };
+
     // 🔔 Register a background listener for the Sensor Data
     ref.listenManual(liveHardwareProvider, (previous, next) {
       next.whenData((data) async {
         if (data != null && data.weight >= AppConstants.fullAlertGrams) {
-          // Trigger 200g FULL Alert!
+          // Trigger 200g FULL Alert with GPS location!
           await NotificationService.showFullBinAlert(
-            binLocation: 'Eco Bin (Live Hardware)',
+            binLocation: data.hasLocation
+                ? 'GPS: ${data.latitude.toStringAsFixed(4)}, ${data.longitude.toStringAsFixed(4)}'
+                : 'Eco Bin (Live Hardware)',
             binId: 'Hardware_Bin_01',
+            latitude: data.latitude,
+            longitude: data.longitude,
+            weight: data.weight,
           );
         }
       });
@@ -43,6 +64,22 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForFullBinAlerts();
     });
+  }
+
+  /// Open Google Maps for turn-by-turn navigation to the bin
+  void _navigateToGoogleMaps(double lat, double lng, String label) async {
+    final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+    // Use url_launcher or fallback
+    try {
+      // For web, open in new tab
+      await launchUrlExternally(url.toString());
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Navigate to: $label ($lat, $lng)')),
+        );
+      }
+    }
   }
 
   void _checkForFullBinAlerts() async {
@@ -125,6 +162,16 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const MapPage()));
             },
           ),
+          if (bins.isNotEmpty && bins.first.latitude != 0.0)
+            ElevatedButton.icon(
+              icon: const Icon(Icons.navigation, size: 18),
+              label: const Text('Navigate'),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentColor, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(context);
+                _navigateToGoogleMaps(bins.first.latitude, bins.first.longitude, bins.first.locationName ?? 'Bin');
+              },
+            ),
         ],
       ),
     );
@@ -163,6 +210,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               ref.invalidate(allBinsProvider);
               ref.invalidate(pendingCollectionsProvider);
               ref.invalidate(allUsersProvider);
+              ref.invalidate(liveHardwareProvider);
             },
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -170,6 +218,10 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildHeader(name),
+                  const SizedBox(height: 20),
+
+                  // 🔴 LIVE HARDWARE WEIGHT CARD
+                  _buildLiveWeightCard(),
                   const SizedBox(height: 24),
 
                   _buildUserList(ref.watch(allUsersProvider)),
@@ -272,6 +324,183 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
           ],
         ),
       ],
+    );
+  }
+
+  /// 🔴 LIVE HARDWARE WEIGHT CARD — Shows real-time bin weight from ThingSpeak
+  Widget _buildLiveWeightCard() {
+    final hardwareAsync = ref.watch(liveHardwareProvider);
+    
+    return GlassCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.monitor_weight, color: AppTheme.primaryColor, size: 24),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Live Bin Weight', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    SizedBox(height: 2),
+                    Text('Real-time data from hardware sensor', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              // Live pulse indicator
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 6, color: AppTheme.primaryColor),
+                    const SizedBox(width: 4),
+                    Text('LIVE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppTheme.primaryColor, letterSpacing: 1)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          hardwareAsync.when(
+            data: (data) {
+              if (data == null) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text('Waiting for sensor data...', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13)),
+                  ),
+                );
+              }
+
+              final weight = data.weight;
+              final fillPct = data.fillPercentage;
+              final statusColor = data.statusColor;
+              final isFull = weight >= AppConstants.fullAlertGrams;
+
+              return Column(
+                children: [
+                  // Weight display
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${weight.toStringAsFixed(1)}',
+                        style: TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: statusColor, height: 1),
+                      ),
+                      const SizedBox(width: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text('grams', style: TextStyle(fontSize: 14, color: statusColor.withValues(alpha: 0.7))),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                        ),
+                        child: Text(
+                          isFull ? '🚨 BIN FULL' : data.statusLabel,
+                          style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Progress bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: fillPct,
+                      minHeight: 10,
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
+                      color: statusColor,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('0g', style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.3))),
+                      Text('${(fillPct * 100).toInt()}% of ${AppConstants.binCapacityGrams.toInt()}g capacity',
+                        style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.5))),
+                      Text('${AppConstants.binCapacityGrams.toInt()}g', style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.3))),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Details row
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _WasteDetail(icon: Icons.scale, label: 'Weight', value: '${weight.toStringAsFixed(1)}g'),
+                        Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
+                        _WasteDetail(icon: Icons.speed, label: 'Fill', value: '${(fillPct * 100).toInt()}%'),
+                        Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
+                        _WasteDetail(
+                          icon: Icons.location_on,
+                          label: 'GPS',
+                          value: data.hasLocation ? '${data.latitude.toStringAsFixed(2)}, ${data.longitude.toStringAsFixed(2)}' : 'N/A',
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Navigate button (only when full and has location)
+                  if (isFull && data.hasLocation) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.navigation, size: 18),
+                        label: const Text('Navigate to Full Bin'),
+                        onPressed: () => _navigateToGoogleMaps(data.latitude, data.longitude, 'Full Bin'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.errorColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            ),
+            error: (e, _) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text('Sensor error: $e', style: const TextStyle(color: AppTheme.errorColor, fontSize: 11)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -405,8 +634,16 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   }
 
   Widget _buildBinDetailCard(dynamic bin, String userId) {
-    final pct = bin.fillPercentage;
+    // Merge live ThingSpeak data with database data
+    final liveData = ref.watch(liveHardwareProvider).value;
+    
+    // Use live weight (grams) if available, otherwise use DB weight (kg → grams)
+    final liveWeightGrams = liveData?.weight ?? (bin.currentWeight * 1000);
+    final liveFillPct = (liveWeightGrams / AppConstants.binCapacityGrams).clamp(0.0, 1.0);
+    
+    final pct = liveFillPct;
     final color = pct >= 0.625 ? AppTheme.errorColor : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
+    final isFull = liveWeightGrams >= AppConstants.fullAlertGrams;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -458,20 +695,48 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    pct >= 0.625 ? '⚠️ FULL' : (pct >= 0.4 ? 'FILLING' : 'OK'),
-                    style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
+                // Status badge with LIVE indicator
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        isFull ? '🚨 FULL' : (pct >= 0.4 ? 'FILLING' : 'OK'),
+                        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    if (liveData != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.circle, size: 5, color: AppTheme.primaryColor),
+                          const SizedBox(width: 3),
+                          Text('LIVE', style: TextStyle(fontSize: 7, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),
             const SizedBox(height: 16),
+            // Fill progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: pct,
+                minHeight: 6,
+                backgroundColor: Colors.white.withValues(alpha: 0.06),
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -481,9 +746,9 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _WasteDetail(icon: Icons.monitor_weight, label: 'Weight', value: '${bin.currentWeight} kg'),
+                  _WasteDetail(icon: Icons.monitor_weight, label: 'Weight', value: '${liveWeightGrams.toStringAsFixed(1)}g'),
                   Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
-                  _WasteDetail(icon: Icons.speed, label: 'Threshold', value: '${bin.threshold} kg'),
+                  _WasteDetail(icon: Icons.speed, label: 'Capacity', value: '${AppConstants.binCapacityGrams.toInt()}g'),
                   Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
                   _WasteDetail(icon: Icons.pie_chart, label: 'Fill', value: '${(pct * 100).toInt()}%'),
                 ],
