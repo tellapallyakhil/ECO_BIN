@@ -14,7 +14,6 @@ import '../../../insights/presentation/pages/insights_page.dart';
 import 'collection_completed_screen.dart';
 import '../../../hardware/presentation/pages/live_hardware_page.dart';
 import '../../../../services/notification_service.dart';
-import '../../../../services/location_service.dart';
 import '../../../../core/constants.dart';
 
 /// Opens a URL externally (Google Maps, browser, etc.)
@@ -190,7 +189,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredBinsAsync = ref.watch(filteredBinsProvider);
+
     final profileAsync = ref.watch(profileProvider);
     final claimedBins = ref.watch(claimedBinsProvider);
     final userId = ref.watch(currentUserProvider)?.id ?? '';
