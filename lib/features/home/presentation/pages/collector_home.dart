@@ -14,6 +14,7 @@ import '../../../insights/presentation/pages/insights_page.dart';
 import 'collection_completed_screen.dart';
 import '../../../hardware/presentation/pages/live_hardware_page.dart';
 import '../../../../services/notification_service.dart';
+import '../../../../services/location_service.dart';
 import '../../../../core/constants.dart';
 
 /// Opens a URL externally (Google Maps, browser, etc.)
@@ -32,10 +33,15 @@ class CollectorHome extends ConsumerStatefulWidget {
 }
 
 class _CollectorHomeState extends ConsumerState<CollectorHome> {
+  bool _isBuzzerSilenced = false;
+  DateTime? _lastAlertTime;
+
   @override
   void initState() {
     super.initState();
-    
+    // 📍 Sync current location as the bin location
+    LocationService.syncBinLocationWithUser();
+
     // Register notification tap callback for navigation
     NotificationService.onNavigateToBin = (lat, lng, location) {
       if (mounted) {
@@ -46,17 +52,22 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
     // 🔔 Register a background listener for the Sensor Data
     ref.listenManual(liveHardwareProvider, (previous, next) {
       next.whenData((data) async {
-        if (data != null && data.weight >= AppConstants.fullAlertGrams) {
-          // Trigger 200g FULL Alert with GPS location!
-          await NotificationService.showFullBinAlert(
-            binLocation: data.hasLocation
-                ? 'GPS: ${data.latitude.toStringAsFixed(4)}, ${data.longitude.toStringAsFixed(4)}'
-                : 'Eco Bin (Live Hardware)',
-            binId: 'Hardware_Bin_01',
-            latitude: data.latitude,
-            longitude: data.longitude,
-            weight: data.weight,
-          );
+        // Only trigger alert if weight >= threshold, AND not silenced, AND not spammed (wait 30s)
+        if (data != null && data.weight >= AppConstants.fullAlertGrams && !_isBuzzerSilenced) {
+          final now = DateTime.now();
+          if (_lastAlertTime == null || now.difference(_lastAlertTime!) > const Duration(seconds: 30)) {
+            _lastAlertTime = now;
+            // Trigger 200g FULL Alert with GPS location!
+            await NotificationService.showFullBinAlert(
+              binLocation: data.hasLocation
+                  ? 'GPS: ${data.latitude.toStringAsFixed(4)}, ${data.longitude.toStringAsFixed(4)}'
+                  : 'Eco Bin (Live Hardware)',
+              binId: 'Hardware_Bin_01',
+              latitude: data.latitude,
+              longitude: data.longitude,
+              weight: data.weight,
+            );
+          }
         }
       });
     });
@@ -86,101 +97,92 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   void _checkForFullBinAlerts() async {
     try {
       final alertBins = await ref.read(alertBinsProvider.future);
-      if (alertBins.isNotEmpty && mounted) {
+      if (alertBins.isNotEmpty && mounted && !_isBuzzerSilenced) {
         _showBinAlert(alertBins);
       }
     } catch (_) {}
   }
 
   void _showBinAlert(List bins) {
+    if (_isBuzzerSilenced) return;
+    
     // Play alert sound 3 times for urgency
     _playAlertSound();
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppTheme.surfaceColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppTheme.errorColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppTheme.surfaceColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.notification_important, color: AppTheme.errorColor),
               ),
-              child: const Icon(Icons.notification_important, color: AppTheme.errorColor),
-            ),
-            const SizedBox(width: 12),
-            const Text('⚠️ Bin Alert!'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${bins.length} bin(s) need immediate collection:',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
-            ),
-            const SizedBox(height: 16),
-            ...bins.take(5).map((bin) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    children: [
-                      Icon(Icons.circle, color: AppTheme.errorColor, size: 10),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              bin.locationName ?? 'Unknown Location',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            Text(
-                              '${bin.currentWeight} kg / ${bin.threshold} kg  (${(bin.fillPercentage * 100).toInt()}% Full)',
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Dismiss'),
+              const SizedBox(width: 12),
+              const Text('⚠️ Bin Alert!'),
+            ],
           ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.map, size: 18),
-            label: const Text('View on Map'),
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const MapPage()));
-            },
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${bins.length} bin(s) need immediate collection:',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              const SizedBox(height: 16),
+              ...bins.take(3).map((bin) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.circle, color: AppTheme.errorColor, size: 10),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(bin.locationName ?? 'Unknown Location', style: const TextStyle(fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                  )),
+            ],
           ),
-          if (bins.isNotEmpty && bins.first.latitude != 0.0)
-            ElevatedButton.icon(
-              icon: const Icon(Icons.navigation, size: 18),
-              label: const Text('Navigate'),
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentColor, foregroundColor: Colors.black),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() => _isBuzzerSilenced = true);
+                NotificationService.stopBuzzer(); // 🔇 Stop the repeating sound!
+                Navigator.pop(context);
+              },
+              child: const Text('Stop Buzzer', style: TextStyle(color: AppTheme.errorColor)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Dismiss'),
+            ),
+            ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _navigateToGoogleMaps(bins.first.latitude, bins.first.longitude, bins.first.locationName ?? 'Bin');
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const MapPage()));
               },
+              child: const Text('View Map'),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   void _playAlertSound() async {
+    if (_isBuzzerSilenced) return;
+
     // Play system alert sound 3 times with delay
     for (int i = 0; i < 3; i++) {
+      if (_isBuzzerSilenced) break;
       SystemSound.play(SystemSoundType.alert);
       HapticFeedback.heavyImpact();
       await Future.delayed(const Duration(milliseconds: 400));
@@ -445,6 +447,46 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                         style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.5))),
                       Text('${AppConstants.binCapacityGrams.toInt()}g', style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.3))),
                     ],
+                  ),
+                  
+                  // LIVE ALERT CONTROL -- 🚦 STOP BUZZER BUTTON
+                  if (isFull || _isBuzzerSilenced)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                      decoration: BoxDecoration(
+                        color: _isBuzzerSilenced 
+                          ? Colors.grey.withValues(alpha: 0.1) 
+                          : AppTheme.errorColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _isBuzzerSilenced 
+                            ? Colors.grey.withValues(alpha: 0.3) 
+                            : AppTheme.errorColor.withValues(alpha: 0.3)
+                        ),
+                      ),
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          foregroundColor: _isBuzzerSilenced ? Colors.grey : AppTheme.errorColor,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _isBuzzerSilenced = !_isBuzzerSilenced;
+                            if (_isBuzzerSilenced) {
+                              NotificationService.stopBuzzer();
+                            }
+                          });
+                        },
+                        icon: Icon(_isBuzzerSilenced ? Icons.volume_off : Icons.notifications_off),
+                        label: Text(
+                          _isBuzzerSilenced ? 'BUZZER SILENCED (Click to Reactivate)' : 'STOP BUZZER / MUTE ALERT',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 16),
 
@@ -1557,13 +1599,13 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
                 }
                 
                 if (mounted) {
-                  // CRITICAL: Refresh the user list so the 100 coins appear instantly!
+                  // CRITICAL: Refresh the user list so the coins appear instantly!
                   ref.invalidate(allUsersProvider);
                   ref.invalidate(profileProvider);
                   ref.invalidate(coinTransactionsProvider);
                   
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('✅ $coins Coins awarded to ${user.fullName}!')),
+                    SnackBar(content: Text('REWARD: $coins Coins awarded to ${user.fullName}!')),
                   );
                 }
               } catch (e) {
@@ -1580,37 +1622,16 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   }
 }
 
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  const _StatCard({required this.label, required this.value, required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 8),
-          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-        ],
-      ),
-    );
-  }
-}
-
 class _WasteDetail extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
 
-  const _WasteDetail({required this.icon, required this.label, required this.value});
+  const _WasteDetail({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
