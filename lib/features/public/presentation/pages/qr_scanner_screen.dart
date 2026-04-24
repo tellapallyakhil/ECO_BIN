@@ -59,19 +59,28 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   }
 
   void _handleScannedCode(String code) {
-    if (code.startsWith('ecobin://claim')) {
+    // Extract the actual bin ID from any ecobin:// URL format
+    String binId = code;
+    
+    if (code.startsWith('ecobin://')) {
       final uri = Uri.parse(code);
-      final binId = uri.queryParameters['binId'] ?? 'unknown';
-      final coins = int.tryParse(uri.queryParameters['coins'] ?? '0') ?? 0;
       
-      _showClaimSuccess(binId, coins);
-      return;
+      // Handle claim URLs (ecobin://claim?binId=xxx&coins=yyy)
+      if (code.startsWith('ecobin://claim')) {
+        final claimBinId = uri.queryParameters['binId'] ?? 'unknown';
+        final coins = int.tryParse(uri.queryParameters['coins'] ?? '0') ?? 0;
+        _showClaimSuccess(claimBinId, coins);
+        return;
+      }
+      
+      // For any other ecobin:// URL, extract binId from query params
+      binId = uri.queryParameters['binId'] ?? uri.host;
     }
 
-    // Default: If the QR code is our bin ID (or a URL containing it)
+    // Navigate to deposit screen with the clean bin ID
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => DepositScreen(binId: code)),
+      MaterialPageRoute(builder: (_) => DepositScreen(binId: binId)),
     );
   }
 
