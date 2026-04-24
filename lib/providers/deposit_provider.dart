@@ -5,8 +5,8 @@ import '../core/constants.dart';
 /// Tracks a plastic deposit session
 class DepositSession {
   final String binId;
-  final double startWeight;
-  final double? endWeight;
+  final double startWeight;  // in grams (from hardware sensor)
+  final double? endWeight;   // in grams (from hardware sensor)
   final bool isActive;
 
   DepositSession({
@@ -16,8 +16,11 @@ class DepositSession {
     this.isActive = true,
   });
 
+  /// How many grams were deposited (difference between end and start)
   double get depositedWeight => (endWeight != null) ? (endWeight! - startWeight).clamp(0.0, 500.0) : 0.0;
-  int get earnedCoins => AppConstants.calculateCoins(depositedWeight); // 0.5 coins per gram
+  
+  /// Estimated coins based on grams deposited
+  int get earnedCoins => AppConstants.calculateCoins(depositedWeight);
 }
 
 /// Manages deposit session state
@@ -25,31 +28,31 @@ class DepositNotifier extends Notifier<DepositSession?> {
   @override
   DepositSession? build() => null;
 
-  /// Start a deposit: record the bin's current weight
-  void startDeposit(String binId, double currentWeight) {
+  /// Start a deposit: record the bin's current weight (in grams from hardware)
+  void startDeposit(String binId, double currentWeightGrams) {
     state = DepositSession(
       binId: binId,
-      startWeight: currentWeight,
+      startWeight: currentWeightGrams,
     );
   }
 
-  /// Finish the deposit: create a record and notify workers
-  Future<void> finishDeposit(double newWeight) async {
+  /// Finish the deposit: record final weight and create a verification request
+  Future<void> finishDeposit(double newWeightGrams) async {
     if (state == null) return;
 
-    final deposited = (newWeight - state!.startWeight).clamp(0.0, 100.0);
+    final deposited = (newWeightGrams - state!.startWeight).clamp(0.0, 500.0);
     
     final session = DepositSession(
       binId: state!.binId,
       startWeight: state!.startWeight,
-      endWeight: newWeight,
+      endWeight: newWeightGrams,
       isActive: false,
     );
 
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
     
-    if (user != null && deposited > 0.001) { // Precision check for small deposits
+    if (user != null && deposited > 0.5) { // At least 0.5g to count
       try {
         final binId = state!.binId;
         
@@ -60,13 +63,13 @@ class DepositNotifier extends Notifier<DepositSession?> {
             .eq('id', binId)
             .maybeSingle();
 
-        // 2. Insert into collection_requests (for worker approval/audit)
+        // 2. Insert into collection_requests (for worker approval)
         await supabase.from('collection_requests').insert({
           'user_id': user.id,
           'user_name': user.userMetadata?['full_name'] ?? 'Guest User',
           'bin_id': binId,
           'bin_location': binResponse?['location_name'] ?? 'Bin #$binId',
-          'weight': deposited, // Recorded in grams (hardware scale unit)
+          'weight': deposited, // Weight in grams
           'status': 'pending',
         });
 
@@ -75,9 +78,9 @@ class DepositNotifier extends Notifier<DepositSession?> {
           await supabase.from('deposit_history').insert({
             'user_id': user.id,
             'bin_id': binId,
-            'weight_grams': (deposited * 1000).toInt(),
+            'weight_grams': deposited.toInt(),
             'start_weight': state!.startWeight,
-            'end_weight': newWeight,
+            'end_weight': newWeightGrams,
           });
         } catch (_) {
           // Table may not exist yet — silent fail is OK
