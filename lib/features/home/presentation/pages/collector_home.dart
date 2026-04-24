@@ -1106,73 +1106,136 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
   }
 
   Widget _buildRequestCard(CollectionRequest req) {
-    final timeStr = "${req.createdAt.hour}:${req.createdAt.minute.toString().padLeft(2, '0')}";
-    final dateStr = "${req.createdAt.day}/${req.createdAt.month}";
-    
+    // Format time as 12-hour with AM/PM
+    final hour = req.createdAt.hour;
+    final minute = req.createdAt.minute.toString().padLeft(2, '0');
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    final timeStr = "$hour12:$minute $period";
+    final dateStr = "${req.createdAt.day}/${req.createdAt.month}/${req.createdAt.year}";
+
+    // Time ago calculation
+    final diff = DateTime.now().difference(req.createdAt);
+    String timeAgo;
+    if (diff.inMinutes < 1) {
+      timeAgo = 'Just now';
+    } else if (diff.inMinutes < 60) {
+      timeAgo = '${diff.inMinutes}m ago';
+    } else if (diff.inHours < 24) {
+      timeAgo = '${diff.inHours}h ago';
+    } else {
+      timeAgo = '${diff.inDays}d ago';
+    }
+
+    // Weight display — the deposit provider stores weight in grams
+    final weightGrams = req.weight;
+    final weightDisplay = weightGrams >= 1000
+        ? '${(weightGrams / 1000).toStringAsFixed(2)} kg'
+        : '${weightGrams.toStringAsFixed(1)} g';
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassCard(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           children: [
+            // Top row: user + time ago badge
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.person_outline, color: AppTheme.primaryColor, size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(req.userName ?? 'Customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      const SizedBox(height: 2),
+                      Text(req.binLocation ?? 'Unknown Bin', 
+                        style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.45)),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(timeAgo, style: const TextStyle(color: AppTheme.accentColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Weight & Time detail row
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                color: Colors.white.withValues(alpha: 0.04),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  Text(timeStr, style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text(dateStr, style: TextStyle(color: AppTheme.primaryColor.withValues(alpha: 0.5), fontSize: 9)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(req.userName ?? 'Customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accentColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(4),
+                  // Weight deposited
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.scale, size: 16, color: AppTheme.accentColor),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(weightDisplay, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.accentColor)),
+                            Text('Waste Deposited', style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.4))),
+                          ],
                         ),
-                        child: Text('${DateTime.now().difference(req.createdAt).inMinutes}m ago', style: const TextStyle(color: AppTheme.accentColor, fontSize: 8, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.scale, size: 12, color: Colors.white70),
-                      const SizedBox(width: 4),
-                      Text('${req.weight.toStringAsFixed(1)} kg', 
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      Text(' • ${req.binLocation}', 
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
-                    ],
+                  Container(width: 1, height: 32, color: Colors.white.withValues(alpha: 0.1)),
+                  const SizedBox(width: 12),
+                  // Time of deposit
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.access_time, size: 16, color: AppTheme.primaryColor),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(timeStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.primaryColor)),
+                            Text(dateStr, style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.4))),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.stars, size: 14),
-              label: const Text('Award Coins', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-              onPressed: () => _showCoinAssignmentDialog(req),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentColor,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            const SizedBox(height: 12),
+
+            // Award Coins button (full width)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.stars, size: 16),
+                label: Text('Award ~${AppConstants.calculateCoins(weightGrams)} Coins', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                onPressed: () => _showCoinAssignmentDialog(req),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.accentColor,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
               ),
             ),
           ],
@@ -1180,6 +1243,7 @@ class _CollectorHomeState extends ConsumerState<CollectorHome> {
       ),
     );
   }
+
 
   void _showCoinAssignmentDialog(CollectionRequest req) {
     // Calculate coins based on weight in grams (0.5 coins per gram)
