@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants.dart';
@@ -8,12 +9,14 @@ class DepositSession {
   final double startWeight;  // in grams (from hardware sensor)
   final double? endWeight;   // in grams (from hardware sensor)
   final bool isActive;
+  final String? errorMessage; // To surface errors to UI
 
   DepositSession({
     required this.binId,
     required this.startWeight,
     this.endWeight,
     this.isActive = true,
+    this.errorMessage,
   });
 
   /// How many grams were deposited (difference between end and start)
@@ -36,9 +39,9 @@ class DepositNotifier extends Notifier<DepositSession?> {
     );
   }
 
-  /// Finish the deposit: record final weight and create a verification request
-  Future<void> finishDeposit(double newWeightGrams) async {
-    if (state == null) return;
+  /// Finish the deposit: ALWAYS create a verification request for the worker
+  Future<String?> finishDeposit(double newWeightGrams) async {
+    if (state == null) return 'No active session';
 
     final deposited = (newWeightGrams - state!.startWeight).clamp(0.0, 500.0);
     
@@ -52,50 +55,94 @@ class DepositNotifier extends Notifier<DepositSession?> {
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
     
-    if (user != null && deposited > 0.5) { // At least 0.5g to count
+    if (user == null) {
+      state = session;
+      return 'User not logged in';
+    }
+
+    try {
+      final binId = state!.binId;
+      
+      // 1. Fetch user's display name from profiles table (most reliable source)
+      String userName = 'Guest User';
       try {
-        final binId = state!.binId;
-        
-        // 1. Fetch bin info for context
+        final profileResponse = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', user.id)
+            .maybeSingle();
+        userName = profileResponse?['full_name'] ?? 
+                   user.userMetadata?['full_name'] ?? 
+                   user.email?.split('@').first ?? 
+                   'Guest User';
+      } catch (_) {
+        userName = user.userMetadata?['full_name'] ?? 
+                   user.email?.split('@').first ?? 
+                   'Guest User';
+      }
+      
+      // 2. Fetch bin info for context
+      String binLocation = 'Bin #$binId';
+      try {
         final binResponse = await supabase
             .from('smart_bins')
             .select('location_name')
             .eq('id', binId)
             .maybeSingle();
+        binLocation = binResponse?['location_name'] ?? binLocation;
+      } catch (_) {}
 
-        // 2. Insert into collection_requests (for worker approval)
-        await supabase.from('collection_requests').insert({
+      // 3. ALWAYS insert into collection_requests — worker will see it
+      //    Even if weight is 0, still record so worker knows someone used the bin
+      await supabase.from('collection_requests').insert({
+        'user_id': user.id,
+        'user_name': userName,
+        'bin_id': binId,
+        'bin_location': binLocation,
+        'weight': deposited, // Weight in grams (difference)
+        'status': 'pending',
+      });
+
+      debugPrint('✅ Collection request created: $userName deposited ${deposited}g at $binLocation');
+
+      // 4. Log into historical audit table for analytics (optional table)
+      try {
+        await supabase.from('deposit_history').insert({
           'user_id': user.id,
-          'user_name': user.userMetadata?['full_name'] ?? 'Guest User',
           'bin_id': binId,
-          'bin_location': binResponse?['location_name'] ?? 'Bin #$binId',
-          'weight': deposited, // Weight in grams
-          'status': 'pending',
+          'weight_grams': deposited.toInt(),
+          'start_weight': state!.startWeight,
+          'end_weight': newWeightGrams,
         });
-
-        // 3. Log into historical audit table for analytics
-        try {
-          await supabase.from('deposit_history').insert({
-            'user_id': user.id,
-            'bin_id': binId,
-            'weight_grams': deposited.toInt(),
-            'start_weight': state!.startWeight,
-            'end_weight': newWeightGrams,
-          });
-        } catch (_) {
-          // Table may not exist yet — silent fail is OK
-        }
-
-      } catch (e) {
-        // Log error and handle fail
+      } catch (_) {
+        // Table may not exist yet — silent fail is OK
       }
-    }
 
-    state = session;
+      state = session;
+      return null; // success
+
+    } catch (e) {
+      debugPrint('❌ Failed to create collection request: $e');
+      state = session.copyWithError('Failed to record deposit: $e');
+      return e.toString();
+    }
   }
 
   /// Reset the session
   void reset() => state = null;
+}
+
+/// Extension to allow copying session with an error message
+extension _DepositSessionCopy on DepositSession {
+  DepositSession copyWithError(String error) {
+    return DepositSession(
+      binId: binId,
+      startWeight: startWeight,
+      endWeight: endWeight,
+      isActive: isActive,
+      errorMessage: error,
+    );
+  }
 }
 
 final depositProvider = NotifierProvider<DepositNotifier, DepositSession?>(() {

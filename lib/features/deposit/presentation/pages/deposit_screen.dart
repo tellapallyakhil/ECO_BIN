@@ -97,6 +97,7 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
       }
     });
   }
+  String? _submitError;
 
   void _finishDeposit() async {
     _timer?.cancel();
@@ -116,16 +117,25 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
 
     setState(() => _step = 2);
 
-    // Log the deposit via provider (for Supabase)
-    try {
-      await ref.read(depositProvider.notifier).finishDeposit(_endWeightGrams);
+    // Submit the deposit to Supabase → creates a request for the worker
+    final error = await ref.read(depositProvider.notifier).finishDeposit(_endWeightGrams);
 
-      // Refresh all data so home shows updated info
-      ref.invalidate(userBinsProvider);
-      ref.invalidate(allBinsProvider);
-      ref.invalidate(coinTransactionsProvider);
-      ref.invalidate(pendingCollectionsProvider);
-    } catch (_) {}
+    if (error != null && mounted) {
+      setState(() => _submitError = error);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ Could not send to worker: $error'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+
+    // Refresh all data so home shows updated info  
+    ref.invalidate(userBinsProvider);
+    ref.invalidate(allBinsProvider);
+    ref.invalidate(coinTransactionsProvider);
+    ref.invalidate(pendingCollectionsProvider);
   }
 
   /// Weight deposited in grams
@@ -586,6 +596,78 @@ class _DepositScreenState extends ConsumerState<DepositScreen> with SingleTicker
                 ),
               ),
             ],
+            const SizedBox(height: 16),
+
+            // ────────────────────────────────────────────────
+            // STATUS: Sent to worker or Error
+            // ────────────────────────────────────────────────
+            if (_submitError == null)
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Deposit sent to worker for verification',
+                      style: TextStyle(color: Colors.green.shade300, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Failed to send to worker. Please retry.',
+                            style: TextStyle(color: Colors.red.shade300, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final error = await ref.read(depositProvider.notifier).finishDeposit(_endWeightGrams);
+                          if (mounted) {
+                            setState(() => _submitError = error);
+                            if (error == null) {
+                              ref.invalidate(pendingCollectionsProvider);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('✅ Deposit sent to worker!')),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Retry'),
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red.shade300),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             const SizedBox(height: 32),
 
             SizedBox(
