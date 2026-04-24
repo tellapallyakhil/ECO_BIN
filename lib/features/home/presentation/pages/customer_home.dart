@@ -70,6 +70,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
               ref.invalidate(userBinsProvider);
               ref.invalidate(coinTransactionsProvider);
               ref.invalidate(leaderboardProvider);
+              ref.invalidate(liveHardwareProvider);
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -367,9 +368,20 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
     );
   }
   Widget _buildBinCard(dynamic bin) {
-    final pct = bin.fillPercentage as double;
-    // Color logic: Green(0-80g=40%), Orange(80-125g=62.5%), Red(125g+=62.5%+)
+    // ── Merge live ThingSpeak weight (grams) with DB data ──
+    final liveData = ref.watch(liveHardwareProvider).value;
+    
+    // Use live weight in grams if available, otherwise convert DB weight (kg → grams)
+    final liveWeightGrams = liveData?.weight ?? (bin.currentWeight * 1000);
+    final liveFillPct = (liveWeightGrams / AppConstants.binCapacityGrams).clamp(0.0, 1.0);
+    
+    final pct = liveFillPct;
     final color = pct >= 0.625 ? AppTheme.errorColor : (pct >= 0.4 ? AppTheme.accentColor : AppTheme.primaryColor);
+
+    // Weight display in grams
+    final weightDisplay = liveWeightGrams >= 1000
+        ? '${(liveWeightGrams / 1000).toStringAsFixed(2)} kg'
+        : '${liveWeightGrams.toStringAsFixed(1)} g';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -380,33 +392,55 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, size: 14, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(bin.locationName ?? 'Location pending', 
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Bin #${bin.id.toString().length > 12 ? bin.id.toString().substring(0, 12) : bin.id}',
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on, size: 14, color: Colors.grey),
-                        const SizedBox(width: 4),
-                        Text(bin.locationName ?? 'Location pending', style: const TextStyle(fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Bin #${bin.id.toString().length > 12 ? bin.id.toString().substring(0, 12) : bin.id}',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    // Live indicator dot
+                    if (liveData != null) ...[
+                      Container(
+                        width: 8, height: 8,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.greenAccent,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        pct >= 0.625 ? '⚠️ FULL' : (liveData != null ? '🟢 LIVE' : 'ACTIVE'),
+                        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    pct >= 0.625 ? '⚠️ FULL' : 'ACTIVE',
-                    style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
                 ),
               ],
             ),
@@ -436,7 +470,7 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
             ),
             const SizedBox(height: 20),
 
-            // Waste data details
+            // Waste data details — now shows LIVE weight in grams
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -446,9 +480,9 @@ class _CustomerHomeState extends ConsumerState<CustomerHome> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildSensorData(Icons.monitor_weight, 'Weight', '${bin.currentWeight} kg', color),
+                  _buildSensorData(Icons.monitor_weight, 'Weight', weightDisplay, color),
                   Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.1)),
-                  _buildSensorData(Icons.speed, 'Threshold', '${bin.threshold} kg', Colors.grey),
+                  _buildSensorData(Icons.speed, 'Capacity', '${AppConstants.binCapacityGrams.toInt()}g', Colors.grey),
                   Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.1)),
                   _buildSensorData(Icons.pie_chart, 'Fill', '${(pct * 100).toInt()}%', color),
                 ],

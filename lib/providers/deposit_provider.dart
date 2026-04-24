@@ -93,17 +93,29 @@ class DepositNotifier extends Notifier<DepositSession?> {
       } catch (_) {}
 
       // 3. ALWAYS insert into collection_requests — worker will see it
-      //    Even if weight is 0, still record so worker knows someone used the bin
-      await supabase.from('collection_requests').insert({
+      final insertData = {
         'user_id': user.id,
         'user_name': userName,
         'bin_id': binId,
         'bin_location': binLocation,
-        'weight': deposited, // Weight in grams (difference)
+        'weight': deposited,
         'status': 'pending',
-      });
+      };
+      
+      debugPrint('========================================');
+      debugPrint('📤 INSERTING INTO collection_requests:');
+      debugPrint('   user_id: ${user.id}');
+      debugPrint('   user_name: $userName');
+      debugPrint('   bin_id: $binId');
+      debugPrint('   bin_location: $binLocation');
+      debugPrint('   weight: $deposited');
+      debugPrint('========================================');
 
-      debugPrint('✅ Collection request created: $userName deposited ${deposited}g at $binLocation');
+      await supabase.from('collection_requests').insert(insertData);
+
+      debugPrint('========================================');
+      debugPrint('✅ SUCCESS: Collection request created!');
+      debugPrint('========================================');
 
       // 4. Log into historical audit table for analytics (optional table)
       try {
@@ -121,9 +133,16 @@ class DepositNotifier extends Notifier<DepositSession?> {
       state = session;
       return null; // success
 
-    } catch (e) {
-      debugPrint('❌ Failed to create collection request: $e');
-      state = session.copyWithError('Failed to record deposit: $e');
+    } catch (e, stackTrace) {
+      debugPrint('========================================');
+      debugPrint('❌❌❌ FAILED TO INSERT: $e');
+      debugPrint('❌ Stack: $stackTrace');
+      debugPrint('========================================');
+      // Print 5 more times to make sure it's visible
+      for (int i = 0; i < 5; i++) {
+        debugPrint('❌ ERROR: $e');
+      }
+      state = session.copyWithError('$e');
       return e.toString();
     }
   }
